@@ -181,51 +181,18 @@ fun HomeScreen(
             contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. Top Header: Minimalist Luxury Brand
+            // 1. Top Brand Title
             item {
-                Row(
+                Text(
+                    text = "Vitre",
+                    color = Color(0xFF00D2FF),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(9.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF00D2FF))
-                        )
-                        Text(
-                            text = "Vitre",
-                            color = Color(0xFF00D2FF),
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-
-                    // Sleek Minimal Premium Badge
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF00D2FF).copy(alpha = 0.12f))
-                            .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 9.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = "PRO",
-                            color = Color(0xFF00D2FF),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                }
+                        .padding(bottom = 8.dp)
+                )
             }
 
             // 2. iOS Dynamic Island In-App Notification (Slides down from top)
