@@ -1735,6 +1735,8 @@ fun IosSpringyMediaInspectionModal(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
         }
     }
 }

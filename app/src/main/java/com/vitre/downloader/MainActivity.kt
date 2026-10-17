@@ -9,6 +9,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -89,7 +91,25 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     containerColor = OledBlack,
                     bottomBar = {
-                        if (activeSubScreen == null && activePlayerUri == null) {
+                        val isBottomBarVisible = activeSubScreen == null &&
+                                activePlayerUri == null &&
+                                inspectedMedia == null
+
+                        AnimatedVisibility(
+                            visible = isBottomBarVisible,
+                            enter = slideInVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) { it } + fadeIn(tween(200)),
+                            exit = slideOutVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            ) { it } + fadeOut(tween(150))
+                        ) {
                             AdaptivePillNavBar(
                                 currentDestination = currentNav,
                                 onNavigate = { destination ->
