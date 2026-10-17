@@ -15,6 +15,8 @@ data class DownloadEntity(
     val filesize: Long,
     val status: String,
     val progress: Float,
+    val mediaUri: String? = null,
+    val clipRange: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -31,6 +33,9 @@ interface DownloadDao {
 
     @Query("UPDATE downloads SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: Long, status: String)
+
+    @Query("UPDATE downloads SET mediaUri = :mediaUri WHERE id = :id")
+    suspend fun updateMediaUri(id: Long, mediaUri: String)
 
     @Delete
     suspend fun deleteDownload(download: DownloadEntity)
@@ -64,7 +69,7 @@ interface HistoryDao {
     suspend fun deleteHistory(history: HistoryEntity)
 }
 
-@Database(entities = [DownloadEntity::class, HistoryEntity::class], version = 1, exportSchema = false)
+@Database(entities = [DownloadEntity::class, HistoryEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun downloadDao(): DownloadDao
     abstract fun historyDao(): HistoryDao
@@ -79,7 +84,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "vitre_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

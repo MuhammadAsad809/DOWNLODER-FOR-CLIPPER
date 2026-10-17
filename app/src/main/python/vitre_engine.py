@@ -172,8 +172,8 @@ def inspect_url(url, cookies_path=None):
     for f in raw_formats:
         fid = f.get('format_id')
         ext = f.get('ext')
-        vcodec = f.get('vcodec', 'none')
-        acodec = f.get('acodec', 'none')
+        vcodec = str(f.get('vcodec') or 'none').lower()
+        acodec = str(f.get('acodec') or 'none').lower()
         height = f.get('height')
         filesize = f.get('filesize') or f.get('filesize_approx')
         fps = f.get('fps')
@@ -183,7 +183,7 @@ def inspect_url(url, cookies_path=None):
         is_audio = acodec != 'none'
 
         # Skip ByteVC1/H.265 TikTok formats if standard H.264 is available
-        if 'bytevc1' in str(vcodec).lower():
+        if 'bytevc1' in vcodec:
             continue
 
         # Format label (e.g. 1080p, 720p, 480p, Audio Only)
@@ -211,7 +211,8 @@ def inspect_url(url, cookies_path=None):
             "acodec": acodec,
             "fps": fps or 0,
             "tbr": tbr or 0,
-            "needs_audio": (is_video and not is_audio)
+            "needs_audio": (is_video and not is_audio),
+            "direct_url": f.get('url') or ''
         })
 
     # If no formats extracted but it's TikTok, fallback
@@ -231,11 +232,12 @@ def inspect_url(url, cookies_path=None):
     }
     return json.dumps(result)
 
-def download_media(url, format_id, output_path, cookies_path=None, callback=None):
+def download_media(url, format_id, output_path, cookies_path=None, callback=None, clip_start=None, clip_end=None):
     """
     Download media to output_path.
     If the requested format is video-only, downloads video and audio separately
     and signals needs_muxing=True so native MediaMuxer combines them with sound.
+    Supports time clipping via clip_start and clip_end.
     """
     if not yt_dlp:
         return json.dumps({"error": "yt-dlp is not available"})
@@ -278,6 +280,9 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'ios', 'web']
+            },
+            'instagram': {
+                'api': ['graphql', 'web']
             }
         },
         'http_headers': {
@@ -288,7 +293,19 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
     if cookies_path and os.path.exists(cookies_path):
         base_opts['cookiefile'] = cookies_path
 
-    # Check format characteristics
+    # Configure partial download range if clipping requested and ffmpeg is installed
+    if clip_start is not None and clip_end is not None:
+        try:
+            import shutil
+            if shutil.which('ffmpeg'):
+                def range_selector(info_dict, ydl):
+                    return [{'start_time': float(clip_start), 'end_time': float(clip_end), 'title': 'clip'}]
+                base_opts['download_ranges'] = range_selector
+                base_opts['force_keyframes_at_cuts'] = False
+        except Exception:
+            pass
+
+    # Check format characteristics with robust string conversion
     is_video_only = False
     try:
         inspect_opts = dict(base_opts)
@@ -298,8 +315,8 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
             if info:
                 for f in info.get('formats', []):
                     if f.get('format_id') == format_id:
-                        vcodec = f.get('vcodec', 'none')
-                        acodec = f.get('acodec', 'none')
+                        vcodec = str(f.get('vcodec') or 'none').lower()
+                        acodec = str(f.get('acodec') or 'none').lower()
                         if vcodec != 'none' and acodec == 'none':
                             is_video_only = True
                         break
@@ -320,9 +337,9 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
             with yt_dlp.YoutubeDL(v_opts) as ydl:
                 ydl.download([canonical_url])
 
-            # Audio stream (prefer AAC / m4a format 140 for instant MP4 muxing)
+            # Audio stream (prefer AAC / m4a for instant MP4 muxing)
             a_opts = dict(base_opts)
-            a_opts['format'] = '140/bestaudio[ext=m4a]/bestaudio/best'
+            a_opts['format'] = '140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
             a_opts['outtmpl'] = audio_tmp
             a_opts['progress_hooks'] = [make_hook("audio")]
 
@@ -345,6 +362,15 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
 
             with yt_dlp.YoutubeDL(c_opts) as ydl:
                 ydl.download([canonical_url])
+
+            # Validate output file
+            if os.path.exists(output_path):
+                size = os.path.getsize(output_path)
+                if size < 1024:
+                    with open(output_path, 'rb') as vf:
+                        head = vf.read(256)
+                        if b'<html' in head.lower() or b'<!doctype' in head.lower():
+                            return json.dumps({"error": "Downloaded file is an HTML login/error page, not valid media."})
 
             return json.dumps({
                 "success": True,

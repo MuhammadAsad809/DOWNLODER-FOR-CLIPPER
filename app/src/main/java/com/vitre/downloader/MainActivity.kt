@@ -146,23 +146,34 @@ class MainActivity : ComponentActivity() {
                                     },
                                     mediaInfo = inspectedMedia,
                                     onDismissInspection = { inspectedMedia = null },
-                                    onStartDownload = { info, format, isAudioOnly, audioFormat ->
+                                    onStartDownload = { info, format, isAudioOnly, audioFormat, clipStart, clipEnd ->
                                         inspectedMedia = null
                                         val downloadId = System.currentTimeMillis()
 
                                         scope.launch {
+                                            val clipRangeStr = if (clipStart != null && clipEnd != null) {
+                                                val sM = clipStart / 60
+                                                val sS = clipStart % 60
+                                                val eM = clipEnd / 60
+                                                val eS = clipEnd % 60
+                                                String.format("%02d:%02d - %02d:%02d", sM, sS, eM, eS)
+                                            } else null
+
+                                            val displayTitle = if (clipRangeStr != null) "${info.title} [Clip $clipRangeStr]" else info.title
+
                                             // 1. Insert download record in DB
                                             app.database.downloadDao().insertDownload(
                                                 DownloadEntity(
                                                     id = downloadId,
                                                     url = info.url,
-                                                    title = info.title,
+                                                    title = displayTitle,
                                                     thumbnail = info.thumbnail,
                                                     formatId = format.formatId,
                                                     resolution = if (isAudioOnly) "Audio (${audioFormat.uppercase()})" else format.resolution,
                                                     filesize = format.filesize,
                                                     status = DownloadStatus.QUEUED.name,
-                                                    progress = 0f
+                                                    progress = 0f,
+                                                    clipRange = clipRangeStr
                                                 )
                                             )
 
@@ -171,10 +182,12 @@ class MainActivity : ComponentActivity() {
                                                 context = this@MainActivity,
                                                 id = downloadId,
                                                 url = info.url,
-                                                title = info.title,
+                                                title = displayTitle,
                                                 formatId = format.formatId,
                                                 isAudioOnly = isAudioOnly,
-                                                audioFormat = audioFormat
+                                                audioFormat = audioFormat,
+                                                clipStart = clipStart,
+                                                clipEnd = clipEnd
                                             )
 
                                             // 3. Switch tab to Downloads
@@ -193,8 +206,9 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { app.database.downloadDao().deleteDownload(item) }
                                     },
                                     onPlayMedia = { item ->
-                                        // Open media player with sample or downloaded media URI
-                                        activePlayerUri = Pair(item.title, Uri.parse(item.url))
+                                        // Open media player with downloaded local mediaUri or fallback
+                                        val uri = item.mediaUri?.let { Uri.parse(it) } ?: Uri.parse(item.url)
+                                        activePlayerUri = Pair(item.title, uri)
                                     }
                                 )
                             }

@@ -41,7 +41,7 @@ fun HomeScreen(
     onInspectClick: (String) -> Unit,
     mediaInfo: MediaInfo?,
     onDismissInspection: () -> Unit,
-    onStartDownload: (MediaInfo, FormatOption, Boolean, String) -> Unit,
+    onStartDownload: (MediaInfo, FormatOption, Boolean, String, Long?, Long?) -> Unit,
     recentDownloads: List<DownloadEntity>,
     errorMessage: String?,
     onClearError: () -> Unit,
@@ -263,7 +263,7 @@ fun RecentDownloadItem(item: DownloadEntity) {
 fun MediaInspectionSheet(
     mediaInfo: MediaInfo,
     onDismiss: () -> Unit,
-    onConfirm: (MediaInfo, FormatOption, Boolean, String) -> Unit
+    onConfirm: (MediaInfo, FormatOption, Boolean, String, Long?, Long?) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var isAudioOnly by remember { mutableStateOf(false) }
@@ -275,6 +275,42 @@ fun MediaInspectionSheet(
         mutableStateOf(videoFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
     }
     var selectedAudioFormat by remember { mutableStateOf("mp3") }
+
+    // Clipper state
+    var enableClipping by remember { mutableStateOf(false) }
+    var clipStartText by remember { mutableStateOf("00:00") }
+    var clipEndText by remember {
+        val totalSec = mediaInfo.duration.takeIf { it > 0 } ?: 60L
+        val defaultEnd = minOf(totalSec, 60L)
+        val m = defaultEnd / 60
+        val s = defaultEnd % 60
+        mutableStateOf(String.format("%02d:%02d", m, s))
+    }
+
+    fun parseTimeInput(text: String): Long? {
+        val clean = text.trim()
+        if (clean.isEmpty()) return null
+        if (clean.contains(":")) {
+            val parts = clean.split(":")
+            if (parts.size == 2) {
+                val m = parts[0].toLongOrNull() ?: return null
+                val s = parts[1].toLongOrNull() ?: return null
+                return m * 60 + s
+            } else if (parts.size == 3) {
+                val h = parts[0].toLongOrNull() ?: return null
+                val m = parts[1].toLongOrNull() ?: return null
+                val s = parts[2].toLongOrNull() ?: return null
+                return h * 3600 + m * 60 + s
+            }
+        }
+        return clean.toLongOrNull()
+    }
+
+    fun formatSecs(sec: Long): String {
+        val m = sec / 60
+        val s = sec % 60
+        return String.format("%02d:%02d", m, s)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -424,17 +460,168 @@ fun MediaInspectionSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            // Video Clipper Controls
+            Spacer(modifier = Modifier.height(18.dp))
+            GlassSurface(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 16.dp,
+                elevation = 2.dp
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.ContentCut,
+                                contentDescription = null,
+                                tint = if (enableClipping) ElectricBlue else TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Clip / Trim Video",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (enableClipping) ElectricBlue else TextPrimary
+                            )
+                        }
+                        Switch(
+                            checked = enableClipping,
+                            onCheckedChange = { enableClipping = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = OledBlack,
+                                checkedTrackColor = ElectricBlue,
+                                uncheckedThumbColor = TextTertiary,
+                                uncheckedTrackColor = CardSurface
+                            )
+                        )
+                    }
+
+                    if (enableClipping) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Start Time (MM:SS)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                OutlinedTextField(
+                                    value = clipStartText,
+                                    onValueChange = { clipStartText = it },
+                                    placeholder = { Text("00:00", color = TextTertiary) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = ElectricBlue,
+                                        unfocusedBorderColor = GlassBorder,
+                                        focusedTextColor = TextPrimary,
+                                        unfocusedTextColor = TextPrimary
+                                    ),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "End Time (MM:SS)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                OutlinedTextField(
+                                    value = clipEndText,
+                                    onValueChange = { clipEndText = it },
+                                    placeholder = { Text("01:30", color = TextTertiary) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = ElectricBlue,
+                                        unfocusedBorderColor = GlassBorder,
+                                        focusedTextColor = TextPrimary,
+                                        unfocusedTextColor = TextPrimary
+                                    ),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                            }
+                        }
+
+                        val parsedStart = parseTimeInput(clipStartText) ?: 0L
+                        val parsedEnd = parseTimeInput(clipEndText) ?: 0L
+                        val clipDuration = (parsedEnd - parsedStart).coerceAtLeast(0L)
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Quick duration preset chips
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val presets = listOf(
+                                "30s" to 30L,
+                                "1m" to 60L,
+                                "2m" to 120L,
+                                "5m" to 300L
+                            )
+                            presets.forEach { (label, secs) ->
+                                AssistChip(
+                                    onClick = {
+                                        clipStartText = "00:00"
+                                        clipEndText = formatSecs(secs)
+                                    },
+                                    label = { Text("First $label", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        labelColor = TextSecondary,
+                                        containerColor = CardSurface
+                                    ),
+                                    border = null
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (parsedEnd > parsedStart) {
+                                "Selected Duration: ${clipDuration / 60}m ${clipDuration % 60}s (downloads only this segment)"
+                            } else {
+                                "End time must be greater than start time"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (parsedEnd > parsedStart) ElectricBlue else ErrorRed
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Download Button
+            val parsedStart = if (enableClipping) parseTimeInput(clipStartText) else null
+            val parsedEnd = if (enableClipping) parseTimeInput(clipEndText) else null
+            val canDownload = !enableClipping || (parsedStart != null && parsedEnd != null && parsedEnd > parsedStart)
+
             GlassButton(
-                text = "Start Download",
+                text = if (enableClipping && parsedStart != null && parsedEnd != null && parsedEnd > parsedStart) {
+                    val d = parsedEnd - parsedStart
+                    "Download Clip (${d / 60}m ${d % 60}s)"
+                } else {
+                    "Start Download"
+                },
                 onClick = {
                     val fmt = selectedFormat ?: mediaInfo.formats.first()
-                    onConfirm(mediaInfo, fmt, isAudioOnly, selectedAudioFormat)
+                    onConfirm(mediaInfo, fmt, isAudioOnly, selectedAudioFormat, parsedStart, parsedEnd)
                 },
+                enabled = canDownload,
                 leadingIcon = {
-                    Icon(Icons.Default.Download, contentDescription = null, tint = OledBlack)
+                    Icon(
+                        imageVector = if (enableClipping) Icons.Default.ContentCut else Icons.Default.Download,
+                        contentDescription = null,
+                        tint = OledBlack
+                    )
                 },
                 modifier = Modifier.fillMaxWidth()
             )

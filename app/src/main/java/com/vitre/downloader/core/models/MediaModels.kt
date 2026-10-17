@@ -21,7 +21,9 @@ data class FormatOption(
     val vcodec: String,
     val acodec: String,
     val fps: Double,
-    val tbr: Double
+    val tbr: Double,
+    val directUrl: String = "",
+    val needsAudio: Boolean = false
 ) {
     val displaySize: String
         get() = if (filesize > 0) {

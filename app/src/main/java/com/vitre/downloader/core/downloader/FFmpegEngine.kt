@@ -212,4 +212,105 @@ class FFmpegEngine {
             Result.failure(e)
         }
     }
+
+    /**
+     * Losslessly trims media to the specified time window [startMs, endMs]
+     * using hardware-accelerated MediaExtractor and MediaMuxer.
+     * Re-bases presentation timestamps from 0 for instant, smooth playback.
+     */
+    suspend fun trimMedia(
+        inputPath: String,
+        outputPath: String,
+        startMs: Long,
+        endMs: Long
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val outputFile = File(outputPath)
+        if (outputFile.exists()) {
+            outputFile.delete()
+        }
+
+        var extractor: MediaExtractor? = null
+        var muxer: MediaMuxer? = null
+
+        try {
+            extractor = MediaExtractor().apply {
+                setDataSource(inputPath)
+            }
+
+            val trackCount = extractor.trackCount
+            if (trackCount == 0) {
+                return@withContext Result.failure(Exception("No tracks found in media file"))
+            }
+
+            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val trackMap = mutableMapOf<Int, Int>()
+            var videoTrackIndex = -1
+
+            for (i in 0 until trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+                    val muxerTrack = muxer.addTrack(format)
+                    trackMap[i] = muxerTrack
+                    extractor.selectTrack(i)
+                    if (mime.startsWith("video/")) {
+                        videoTrackIndex = i
+                    }
+                }
+            }
+
+            if (trackMap.isEmpty()) {
+                return@withContext Result.failure(Exception("No supported audio/video tracks found"))
+            }
+
+            muxer.start()
+
+            val startUs = startMs * 1000L
+            val endUs = endMs * 1000L
+
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+
+            val buffer = ByteBuffer.allocate(2 * 1024 * 1024)
+            val bufferInfo = MediaCodec.BufferInfo()
+            val trackBaseTimeUs = mutableMapOf<Int, Long>()
+
+            while (true) {
+                val trackIndex = extractor.sampleTrackIndex
+                if (trackIndex < 0) break
+
+                val sampleTimeUs = extractor.sampleTime
+
+                // If video track reached end, stop clipping
+                if (trackIndex == videoTrackIndex && sampleTimeUs > endUs) {
+                    break
+                }
+
+                if (sampleTimeUs >= startUs) {
+                    val base = trackBaseTimeUs.getOrPut(trackIndex) { sampleTimeUs }
+                    val muxerTrack = trackMap[trackIndex]
+                    if (muxerTrack != null) {
+                        bufferInfo.offset = 0
+                        bufferInfo.size = extractor.readSampleData(buffer, 0)
+                        if (bufferInfo.size > 0) {
+                            bufferInfo.presentationTimeUs = maxOf(0L, sampleTimeUs - base)
+                            bufferInfo.flags = extractor.sampleFlags
+                            muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
+                        }
+                    }
+                }
+
+                if (!extractor.advance()) {
+                    break
+                }
+            }
+
+            muxer.stop()
+            Result.success(outputPath)
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            try { extractor?.release() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
+        }
+    }
 }

@@ -57,11 +57,13 @@ class DownloadService : Service() {
         val isAudioOnly = intent.getBooleanExtra(EXTRA_IS_AUDIO, false)
         val audioFormat = intent.getStringExtra(EXTRA_AUDIO_FORMAT) ?: "mp3"
         val downloadId = intent.getLongExtra(EXTRA_DOWNLOAD_ID, System.currentTimeMillis())
+        val clipStart = if (intent.hasExtra(EXTRA_CLIP_START)) intent.getLongExtra(EXTRA_CLIP_START, -1L).takeIf { it >= 0 } else null
+        val clipEnd = if (intent.hasExtra(EXTRA_CLIP_END)) intent.getLongExtra(EXTRA_CLIP_END, -1L).takeIf { it >= 0 } else null
 
         startForegroundServiceNotification(title)
 
         serviceScope.launch {
-            processDownload(downloadId, url, title, formatId, isAudioOnly, audioFormat)
+            processDownload(downloadId, url, title, formatId, isAudioOnly, audioFormat, clipStart, clipEnd)
         }
 
         return START_NOT_STICKY
@@ -86,7 +88,9 @@ class DownloadService : Service() {
         title: String,
         formatId: String,
         isAudioOnly: Boolean,
-        audioFormat: String
+        audioFormat: String,
+        clipStart: Long?,
+        clipEnd: Long?
     ) {
         val db = (application as VitreApplication).database
         val downloadDao = db.downloadDao()
@@ -100,7 +104,9 @@ class DownloadService : Service() {
             url = url,
             formatId = formatId,
             outputPath = tempFile.absolutePath,
-            cookiesPath = null
+            cookiesPath = null,
+            clipStart = clipStart,
+            clipEnd = clipEnd
         ) { progress ->
             if (!isCancelled) {
                 val progressText = "${progress.formattedSpeed} • ETA ${progress.formattedEta}"
@@ -154,9 +160,39 @@ class DownloadService : Service() {
             }
         }
 
-        // 3. Save to Custom Folder or Public MediaStore
-        val finalDisplayName = if (isAudioOnly) "$safeTitle.$audioFormat" else "$safeTitle.mp4"
-        val mimeType = if (isAudioOnly) "audio/$audioFormat" else "video/mp4"
+        // 4. Video Clipper: Trim file if user requested a specific time slice
+        if (clipStart != null && clipEnd != null && clipEnd > clipStart && !isAudioOnly) {
+            val trimNotif = createNotification(title, "Clipping video segment...", 98, false)
+            notificationManager.notify(NOTIFICATION_ID, trimNotif)
+
+            val clippedFile = File(tempDir, "${safeTitle}_clip_${clipStart}s_${clipEnd}s.mp4")
+            val trimResult = ffmpegEngine.trimMedia(
+                inputPath = finalFile.absolutePath,
+                outputPath = clippedFile.absolutePath,
+                startMs = clipStart * 1000L,
+                endMs = clipEnd * 1000L
+            )
+            if (trimResult.isSuccess && clippedFile.exists() && clippedFile.length() > 0) {
+                finalFile.delete()
+                finalFile = clippedFile
+            }
+        }
+
+        // 5. Detect container type to ensure correct extension and MIME type
+        val isWebMFile = isWebM(finalFile)
+        val ext = when {
+            isAudioOnly -> audioFormat
+            isWebMFile -> "webm"
+            else -> "mp4"
+        }
+        val mimeType = when {
+            isAudioOnly -> "audio/$audioFormat"
+            isWebMFile -> "video/webm"
+            else -> "video/mp4"
+        }
+
+        val clipSuffix = if (clipStart != null && clipEnd != null) "_clip" else ""
+        val finalDisplayName = "$safeTitle$clipSuffix.$ext"
 
         val prefs = (application as VitreApplication).preferences
         val customUriStr = prefs.customDownloadUri.firstOrNull()
@@ -192,6 +228,10 @@ class DownloadService : Service() {
         finalFile.delete()
 
         if (saveResult.isSuccess) {
+            val savedUri = saveResult.getOrNull()
+            if (savedUri != null) {
+                downloadDao.updateMediaUri(id, savedUri.toString())
+            }
             val completeNotif = createNotification(title, "Saved to device storage", 100, false)
             notificationManager.notify(NOTIFICATION_ID, completeNotif)
             downloadDao.updateStatus(id, DownloadStatus.COMPLETED.name)
@@ -201,6 +241,20 @@ class DownloadService : Service() {
 
         stopForeground(STOP_FOREGROUND_DETACH)
         stopSelf()
+    }
+
+    private fun isWebM(file: File): Boolean {
+        return try {
+            if (!file.exists() || file.length() < 4) return false
+            file.inputStream().use { stream ->
+                val header = ByteArray(4)
+                stream.read(header)
+                header[0] == 0x1A.toByte() && header[1] == 0x45.toByte() &&
+                header[2] == 0xDF.toByte() && header[3] == 0xA3.toByte()
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun createNotification(
@@ -253,6 +307,8 @@ class DownloadService : Service() {
         const val EXTRA_FORMAT_ID = "EXTRA_FORMAT_ID"
         const val EXTRA_IS_AUDIO = "EXTRA_IS_AUDIO"
         const val EXTRA_AUDIO_FORMAT = "EXTRA_AUDIO_FORMAT"
+        const val EXTRA_CLIP_START = "EXTRA_CLIP_START"
+        const val EXTRA_CLIP_END = "EXTRA_CLIP_END"
 
         fun startDownload(
             context: Context,
@@ -261,7 +317,9 @@ class DownloadService : Service() {
             title: String,
             formatId: String,
             isAudioOnly: Boolean,
-            audioFormat: String
+            audioFormat: String,
+            clipStart: Long? = null,
+            clipEnd: Long? = null
         ) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 putExtra(EXTRA_DOWNLOAD_ID, id)
@@ -270,6 +328,8 @@ class DownloadService : Service() {
                 putExtra(EXTRA_FORMAT_ID, formatId)
                 putExtra(EXTRA_IS_AUDIO, isAudioOnly)
                 putExtra(EXTRA_AUDIO_FORMAT, audioFormat)
+                if (clipStart != null) putExtra(EXTRA_CLIP_START, clipStart)
+                if (clipEnd != null) putExtra(EXTRA_CLIP_END, clipEnd)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

@@ -228,6 +228,7 @@ fun CompletedDownloadCard(
     onPlay: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
     GlassSurface(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 16.dp,
@@ -264,15 +265,38 @@ fun CompletedDownloadCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
+                val subtitle = if (item.clipRange != null) {
+                    "${item.resolution} • Clip ${item.clipRange}"
+                } else {
+                    item.resolution
+                }
                 Text(
-                    text = item.resolution,
+                    text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
+                    color = if (item.clipRange != null) ElectricBlue else TextSecondary
                 )
             }
 
             IconButton(onClick = onPlay) {
                 Icon(Icons.Default.PlayCircle, contentDescription = "Play", tint = ElectricBlue)
+            }
+
+            IconButton(onClick = {
+                val uri = item.mediaUri?.let { Uri.parse(it) }
+                if (uri != null) {
+                    try {
+                        val isAudio = item.resolution.contains("audio", ignoreCase = true)
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, if (isAudio) "audio/*" else "video/*")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Open with"))
+                    } catch (_: Exception) {}
+                } else {
+                    onPlay()
+                }
+            }) {
+                Icon(Icons.Default.OpenInNew, contentDescription = "Open In External App", tint = TextSecondary)
             }
 
             IconButton(onClick = onDelete) {

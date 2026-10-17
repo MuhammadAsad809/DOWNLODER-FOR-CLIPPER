@@ -61,7 +61,9 @@ class YtDlpEngine {
                                 vcodec = f.optString("vcodec", "none"),
                                 acodec = f.optString("acodec", "none"),
                                 fps = f.optDouble("fps", 0.0),
-                                tbr = f.optDouble("tbr", 0.0)
+                                tbr = f.optDouble("tbr", 0.0),
+                                directUrl = f.optString("direct_url", ""),
+                                needsAudio = f.optBoolean("needs_audio", false)
                             )
                         )
                     }
@@ -95,6 +97,8 @@ data class EngineDownloadResult(
         formatId: String,
         outputPath: String,
         cookiesPath: String? = null,
+        clipStart: Long? = null,
+        clipEnd: Long? = null,
         onProgress: (DownloadProgress) -> Unit
     ): Result<EngineDownloadResult> = withContext(Dispatchers.IO) {
         try {
@@ -125,7 +129,9 @@ data class EngineDownloadResult(
                 formatId,
                 outputPath,
                 cookiesPath,
-                pyCallback
+                pyCallback,
+                clipStart,
+                clipEnd
             ).toString()
 
             val json = JSONObject(pyResult)
