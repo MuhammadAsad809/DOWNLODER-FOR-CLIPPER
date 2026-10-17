@@ -75,7 +75,7 @@ fun AdaptivePillNavBar(
                             indication = null
                         ) { onNavigate(destination) }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterVertically,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     Icon(

@@ -116,7 +116,7 @@ fun HistoryScreen(
                         Column(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterVertically
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(Icons.Default.History, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(36.dp))
                             Spacer(modifier = Modifier.height(8.dp))

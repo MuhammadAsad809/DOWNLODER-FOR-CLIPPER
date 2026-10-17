@@ -179,7 +179,7 @@ fun HomeScreen(
                         Column(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterVertically
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(Icons.Default.DownloadDone, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(32.dp))
                             Spacer(modifier = Modifier.height(6.dp))

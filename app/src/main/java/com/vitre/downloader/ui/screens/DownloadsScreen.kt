@@ -134,7 +134,7 @@ fun DownloadsScreen(
                         Column(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterVertically
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(Icons.Default.DownloadDone, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(36.dp))
                             Spacer(modifier = Modifier.height(8.dp))
