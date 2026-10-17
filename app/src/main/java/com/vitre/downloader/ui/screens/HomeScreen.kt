@@ -18,8 +18,11 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
@@ -66,6 +69,30 @@ data class SiteBrandItem(
     val drawableRes: Int,
     val secondaryColor: Color = color
 )
+
+/**
+ * Resolves 3D Platform Icon for any extractor name
+ */
+fun getPlatformDrawable(extractor: String): Int {
+    val ext = extractor.lowercase()
+    return when {
+        ext.contains("youtube") || ext.contains("youtu") -> R.drawable.ic_3d_youtube
+        ext.contains("tiktok") -> R.drawable.ic_3d_tiktok
+        ext.contains("instagram") -> R.drawable.ic_3d_instagram
+        ext.contains("twitter") || ext.contains("x.com") -> R.drawable.ic_3d_x
+        ext.contains("facebook") || ext.contains("fb") -> R.drawable.ic_3d_facebook
+        ext.contains("pinterest") -> R.drawable.ic_3d_pinterest
+        ext.contains("reddit") -> R.drawable.ic_3d_reddit
+        ext.contains("twitch") -> R.drawable.ic_3d_twitch
+        ext.contains("soundcloud") -> R.drawable.ic_3d_soundcloud
+        ext.contains("telegram") || ext.contains("t.me") -> R.drawable.ic_3d_telegram
+        ext.contains("snapchat") -> R.drawable.ic_3d_snapchat
+        ext.contains("spotify") -> R.drawable.ic_3d_spotify
+        ext.contains("discord") -> R.drawable.ic_3d_discord
+        ext.contains("linkedin") -> R.drawable.ic_3d_linkedin
+        else -> R.drawable.ic_3d_youtube
+    }
+}
 
 /**
  * In-App iOS Dynamic Island Notification Data
@@ -160,6 +187,18 @@ fun HomeScreen(
         )
     }
 
+    val isModalVisible = mediaInfo != null
+    val backgroundBlur by animateDpAsState(
+        targetValue = if (isModalVisible) 28.dp else 0.dp,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "BackgroundBlur"
+    )
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (isModalVisible) 0.65f else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "ScrimAlpha"
+    )
+
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -177,6 +216,10 @@ fun HomeScreen(
         LazyColumn(
             modifier = contentWidthModifier
                 .fillMaxSize()
+                .then(
+                    if (backgroundBlur > 0.dp) Modifier.blur(backgroundBlur)
+                    else Modifier
+                )
                 .padding(horizontal = if (isTabletOrLarge) 24.dp else 20.dp),
             contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -374,13 +417,50 @@ fun HomeScreen(
             }
         }
 
-        // 8. iOS Springy Media Inspection Modal Dialog with Clipper & Formats
-        if (mediaInfo != null) {
-            IosSpringyMediaInspectionModal(
-                mediaInfo = mediaInfo,
-                onDismiss = onDismissInspection,
-                onConfirm = onStartDownload
+        // 8. Animated Scrim Backdrop when Media Inspection is active
+        if (scrimAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = scrimAlpha))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        onDismissInspection()
+                    }
             )
+        }
+
+        // 9. In-Tree iOS Springy Media Inspection Modal Overlay with Background Blur
+        AnimatedVisibility(
+            visible = isModalVisible,
+            enter = fadeIn(tween(250)) + slideInVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) { fullHeight -> fullHeight },
+            exit = fadeOut(tween(200)) + slideOutVertically(
+                animationSpec = spring(stiffness = Spring.StiffnessMedium)
+            ) { fullHeight -> fullHeight },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .then(
+                    if (isTabletOrLarge) Modifier.widthIn(max = 600.dp)
+                    else Modifier.fillMaxWidth()
+                )
+        ) {
+            if (mediaInfo != null) {
+                BackHandler(enabled = true) {
+                    onDismissInspection()
+                }
+                IosSpringyMediaInspectionModal(
+                    mediaInfo = mediaInfo,
+                    onDismiss = onDismissInspection,
+                    onConfirm = onStartDownload
+                )
+            }
         }
     }
 }
@@ -1019,7 +1099,8 @@ fun LiquidGlassDownloadButton(
 }
 
 /**
- * iOS Springy Media Inspection Modal Dialog with Quality Selector & Video Clipper
+ * iOS Springy Media Inspection Modal with Big Half-Size Cinematic Preview,
+ * Liquid Glass styling, Platform 3D Badging, Video Clipper & Format Selector.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1081,414 +1162,577 @@ fun IosSpringyMediaInspectionModal(
         return String.format("%02d:%02d", m, s)
     }
 
-    val modalShape = RoundedCornerShape(32.dp)
+    val modalShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .shadow(
+                elevation = 32.dp,
+                shape = modalShape,
+                ambientColor = Color.Black,
+                spotColor = Color(0xFF00D2FF).copy(alpha = 0.45f)
+            )
+            .clip(modalShape)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF141C2B).copy(alpha = 0.92f),
+                        Color(0xFF0D1422).copy(alpha = 0.95f),
+                        Color(0xFF070B13).copy(alpha = 0.98f)
+                    )
+                )
+            )
+            .border(
+                BorderStroke(
+                    width = 1.3.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.65f),
+                            Color(0xFF00D2FF).copy(alpha = 0.40f),
+                            Color.White.copy(alpha = 0.12f),
+                            Color(0xFF00D2FF).copy(alpha = 0.22f)
+                        )
+                    )
+                ),
+                shape = modalShape
+            )
     ) {
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.76f))
-                .clickable { onDismiss() }
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            contentAlignment = Alignment.BottomCenter
+                .fillMaxWidth()
+                .heightIn(max = 660.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
-            Column(
+            // 1. Top iOS Grabber Bar & Platform / Close Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Platform Indicator
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val platformRes = getPlatformDrawable(mediaInfo.extractor)
+                    Image(
+                        painter = painterResource(id = platformRes),
+                        contentDescription = mediaInfo.extractor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = mediaInfo.extractor.ifBlank { "Media Stream" },
+                        color = Color(0xFF00D2FF),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.4.sp
+                    )
+                }
+
+                // Drag indicator pill
+                Box(
+                    modifier = Modifier
+                        .size(38.dp, 4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.28f))
+                )
+
+                // Close Button
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFFCBD5E1),
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 2. Large Cinematic 16:9 Media Preview Banner (Half-card prominence)
+            val bannerHeight = 185.dp
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = false) {} // Prevent click from bubbling to backdrop
-                    .shadow(
-                        elevation = 28.dp,
-                        shape = modalShape,
-                        ambientColor = Color.Black,
-                        spotColor = Color(0xFF00D2FF).copy(alpha = 0.35f)
-                    )
-                    .clip(modalShape)
-                    .background(Color(0xFF0F1522).copy(alpha = 0.98f))
+                    .height(bannerHeight)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF0D1420))
                     .border(
-                        width = 1.2.dp,
+                        width = 1.dp,
                         brush = Brush.verticalGradient(
                             listOf(
                                 Color.White.copy(alpha = 0.35f),
-                                Color(0xFF00D2FF).copy(alpha = 0.3f),
-                                Color.White.copy(alpha = 0.08f)
+                                Color(0xFF00D2FF).copy(alpha = 0.25f),
+                                Color.Transparent
                             )
                         ),
-                        shape = modalShape
+                        shape = RoundedCornerShape(20.dp)
                     )
-                    .padding(22.dp)
             ) {
-                // Top iOS Grabber Handle
-                Box(
-                    modifier = Modifier
-                        .size(36.dp, 4.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.25f))
-                        .align(Alignment.CenterHorizontally)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Media Preview Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (mediaInfo.thumbnail.isNotBlank()) {
-                        AsyncImage(
-                            model = mediaInfo.thumbnail,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(76.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(76.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFF192233)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF00D2FF))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = mediaInfo.title,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFFF5F8FC),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${mediaInfo.uploader} • ${mediaInfo.extractor}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF8E9BB0)
-                        )
-                        if (mediaInfo.duration > 0) {
-                            Text(
-                                text = "Duration: ${formatSecs(mediaInfo.duration)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF00D2FF)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // iOS Segmented Control (Video vs Audio Only)
-                if (!isImageOnly) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFF141C2B))
-                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                            .padding(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (!isAudioOnly) Color(0xFF00D2FF) else Color.Transparent)
-                                .clickable { isAudioOnly = false },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Video",
-                                color = if (!isAudioOnly) Color.Black else Color(0xFF8E9BB0),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isAudioOnly) Color(0xFF00D2FF) else Color.Transparent)
-                                .clickable { isAudioOnly = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Audio Only",
-                                color = if (isAudioOnly) Color.Black else Color(0xFF8E9BB0),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                // Format Selection Title
-                Text(
-                    text = when {
-                        isImageOnly -> "Select Image Quality"
-                        isAudioOnly -> "Select Audio Format"
-                        else -> "Select Resolution"
-                    },
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF8E9BB0)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Formats LazyRow
-                if (isImageOnly) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(imageFormats) { fmt ->
-                            val isSelected = selectedFormat == fmt
-                            QualityFormatChip(
-                                label = fmt.resolution,
-                                subtext = fmt.displaySize,
-                                isSelected = isSelected,
-                                onClick = { selectedFormat = fmt }
-                            )
-                        }
-                    }
-                } else if (!isAudioOnly) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(videoFormats) { fmt ->
-                            val isSelected = selectedFormat == fmt
-                            QualityFormatChip(
-                                label = fmt.resolution,
-                                subtext = fmt.displaySize,
-                                isSelected = isSelected,
-                                onClick = { selectedFormat = fmt }
-                            )
-                        }
-                    }
+                if (mediaInfo.thumbnail.isNotBlank()) {
+                    AsyncImage(
+                        model = mediaInfo.thumbnail,
+                        contentDescription = mediaInfo.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 } else {
-                    val formats = listOf("mp3", "m4a", "opus")
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        formats.forEach { fmt ->
-                            val isSelected = selectedAudioFormat == fmt
-                            QualityFormatChip(
-                                label = fmt.uppercase(),
-                                subtext = "Audio",
-                                isSelected = isSelected,
-                                onClick = { selectedAudioFormat = fmt }
-                            )
-                        }
-                    }
-                }
-
-                // Video Clipper / Trimmer Controls
-                if (!isImageOnly && !isAudioOnly) {
-                    Spacer(modifier = Modifier.height(16.dp))
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFF141C2B).copy(alpha = 0.9f))
-                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
-                            .padding(14.dp)
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0xFF1E2A3E),
+                                        Color(0xFF0B1019)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCut,
-                                        contentDescription = null,
-                                        tint = if (enableClipping) Color(0xFF00D2FF) else Color(0xFF8E9BB0),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Clip / Trim Video",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = if (enableClipping) Color(0xFF00D2FF) else Color(0xFFF5F8FC)
-                                    )
-                                }
-                                Switch(
-                                    checked = enableClipping,
-                                    onCheckedChange = { enableClipping = it },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.Black,
-                                        checkedTrackColor = Color(0xFF00D2FF),
-                                        uncheckedThumbColor = Color(0xFF556275),
-                                        uncheckedTrackColor = Color(0xFF0A0F17)
-                                    )
-                                )
-                            }
-
-                            if (enableClipping) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Start Time (MM:SS)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF8E9BB0)
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        BasicTextField(
-                                            value = clipStartText,
-                                            onValueChange = { clipStartText = it },
-                                            singleLine = true,
-                                            textStyle = TextStyle(
-                                                color = Color.White,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            cursorBrush = SolidColor(Color(0xFF00D2FF)),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(Color.White.copy(alpha = 0.08f))
-                                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                        )
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "End Time (MM:SS)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF8E9BB0)
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        BasicTextField(
-                                            value = clipEndText,
-                                            onValueChange = { clipEndText = it },
-                                            singleLine = true,
-                                            textStyle = TextStyle(
-                                                color = Color.White,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            cursorBrush = SolidColor(Color(0xFF00D2FF)),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(Color.White.copy(alpha = 0.08f))
-                                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                        )
-                                    }
-                                }
-
-                                val parsedStart = parseTimeInput(clipStartText) ?: 0L
-                                val parsedEnd = parseTimeInput(clipEndText) ?: 0L
-                                val clipDuration = (parsedEnd - parsedStart).coerceAtLeast(0L)
-
-                                Spacer(modifier = Modifier.height(10.dp))
-                                // Quick duration presets
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    val presets = listOf("30s" to 30L, "1m" to 60L, "2m" to 120L, "5m" to 300L)
-                                    presets.forEach { (label, secs) ->
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.White.copy(alpha = 0.08f))
-                                                .clickable {
-                                                    clipStartText = "00:00"
-                                                    clipEndText = formatSecs(secs)
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                color = Color(0xFF00D2FF),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = if (parsedEnd > parsedStart) {
-                                        "Selected Duration: ${clipDuration / 60}m ${clipDuration % 60}s (downloads only this segment)"
-                                    } else {
-                                        "End time must be greater than start time"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (parsedEnd > parsedStart) Color(0xFF00D2FF) else Color(0xFFFF5252)
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color(0xFF00D2FF),
+                            modifier = Modifier.size(56.dp)
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                // Vignette and bottom gradient overlay for legibility
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.25f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.75f)
+                                )
+                            )
+                        )
+                )
 
-                // Action Buttons: Download Now & Cancel
-                val parsedStart = if (enableClipping) parseTimeInput(clipStartText) else null
-                val parsedEnd = if (enableClipping) parseTimeInput(clipEndText) else null
-                val canDownload = !enableClipping || (parsedStart != null && parsedEnd != null && parsedEnd > parsedStart)
+                // Center Liquid Glass Play Disc
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .align(Alignment.Center)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .border(
+                            1.2.dp,
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.7f),
+                                    Color(0xFF00D2FF).copy(alpha = 0.5f)
+                                )
+                            ),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color(0xFF00D2FF),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
 
+                // Bottom-Left Quality / Type Pill
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF00D2FF).copy(alpha = 0.25f))
+                        .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isImageOnly) "IMAGE POST" else if (videoFormats.any { it.resolution.contains("1080") || it.resolution.contains("4K") || it.resolution.contains("2160") }) "ULTRA HD" else "HD VIDEO",
+                        color = Color(0xFF00D2FF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Bottom-Right Duration badge
+                if (mediaInfo.duration > 0) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = formatSecs(mediaInfo.duration),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 3. Media Title & Author details
+            Text(
+                text = mediaInfo.title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.3).sp
+                ),
+                color = Color(0xFFF5F8FC),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (mediaInfo.uploader.isNotBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = "${mediaInfo.uploader} • ${mediaInfo.extractor}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF8E9BB0),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 4. iOS Segmented Control (Video vs Audio Only)
+            if (!isImageOnly) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF101726))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+                        .padding(3.dp)
                 ) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .clickable { onDismiss() },
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(
+                                if (!isAudioOnly) Brush.horizontalGradient(
+                                    listOf(Color(0xFF00D2FF), Color(0xFF00A3FF))
+                                ) else SolidColor(Color.Transparent)
+                            )
+                            .clickable { isAudioOnly = false },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Cancel",
-                            color = Color(0xFF8E9BB0),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = "Video",
+                            color = if (!isAudioOnly) Color(0xFF050810) else Color(0xFF8E9BB0),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
 
                     Box(
                         modifier = Modifier
-                            .weight(2f)
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (canDownload) Color(0xFF00D2FF) else Color(0xFF1E2838))
-                            .clickable(enabled = canDownload) {
-                                val fmt = selectedFormat ?: mediaInfo.formats.first()
-                                onConfirm(mediaInfo, fmt, isAudioOnly, selectedAudioFormat, parsedStart, parsedEnd)
-                            },
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(
+                                if (isAudioOnly) Brush.horizontalGradient(
+                                    listOf(Color(0xFF00D2FF), Color(0xFF00A3FF))
+                                ) else SolidColor(Color.Transparent)
+                            )
+                            .clickable { isAudioOnly = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (enableClipping && parsedStart != null && parsedEnd != null && parsedEnd > parsedStart) {
-                                val d = parsedEnd - parsedStart
-                                "Download Clip (${d / 60}m ${d % 60}s)"
-                            } else {
-                                "Start Download"
-                            },
-                            color = if (canDownload) Color.Black else Color(0xFF556275),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "Audio Only",
+                            color = if (isAudioOnly) Color(0xFF050810) else Color(0xFF8E9BB0),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // 5. Format Selection Title & Chips
+            Text(
+                text = when {
+                    isImageOnly -> "Select Image Quality"
+                    isAudioOnly -> "Select Audio Format"
+                    else -> "Select Resolution"
+                },
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color(0xFF8E9BB0)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isImageOnly) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(imageFormats) { fmt ->
+                        val isSelected = selectedFormat == fmt
+                        QualityFormatChip(
+                            label = fmt.resolution,
+                            subtext = fmt.displaySize,
+                            isSelected = isSelected,
+                            onClick = { selectedFormat = fmt }
+                        )
+                    }
+                }
+            } else if (!isAudioOnly) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(videoFormats) { fmt ->
+                        val isSelected = selectedFormat == fmt
+                        QualityFormatChip(
+                            label = fmt.resolution,
+                            subtext = fmt.displaySize,
+                            isSelected = isSelected,
+                            onClick = { selectedFormat = fmt }
+                        )
+                    }
+                }
+            } else {
+                val formats = listOf("mp3", "m4a", "opus")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    formats.forEach { fmt ->
+                        val isSelected = selectedAudioFormat == fmt
+                        QualityFormatChip(
+                            label = fmt.uppercase(),
+                            subtext = "Audio",
+                            isSelected = isSelected,
+                            onClick = { selectedAudioFormat = fmt }
+                        )
+                    }
+                }
+            }
+
+            // 6. Video Clipper / Trimmer Controls
+            if (!isImageOnly && !isAudioOnly) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFF141C2B).copy(alpha = 0.9f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
+                        .padding(14.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCut,
+                                    contentDescription = null,
+                                    tint = if (enableClipping) Color(0xFF00D2FF) else Color(0xFF8E9BB0),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Clip / Trim Video",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (enableClipping) Color(0xFF00D2FF) else Color(0xFFF5F8FC)
+                                )
+                            }
+                            Switch(
+                                checked = enableClipping,
+                                onCheckedChange = { enableClipping = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.Black,
+                                    checkedTrackColor = Color(0xFF00D2FF),
+                                    uncheckedThumbColor = Color(0xFF556275),
+                                    uncheckedTrackColor = Color(0xFF0A0F17)
+                                )
+                            )
+                        }
+
+                        if (enableClipping) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Start Time (MM:SS)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF8E9BB0)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    BasicTextField(
+                                        value = clipStartText,
+                                        onValueChange = { clipStartText = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        cursorBrush = SolidColor(Color(0xFF00D2FF)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "End Time (MM:SS)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF8E9BB0)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    BasicTextField(
+                                        value = clipEndText,
+                                        onValueChange = { clipEndText = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        cursorBrush = SolidColor(Color(0xFF00D2FF)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
+
+                            val parsedStart = parseTimeInput(clipStartText) ?: 0L
+                            val parsedEnd = parseTimeInput(clipEndText) ?: 0L
+                            val clipDuration = (parsedEnd - parsedStart).coerceAtLeast(0L)
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            // Quick duration presets
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val presets = listOf("30s" to 30L, "1m" to 60L, "2m" to 120L, "5m" to 300L)
+                                presets.forEach { (label, secs) ->
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .clickable {
+                                                clipStartText = "00:00"
+                                                clipEndText = formatSecs(secs)
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            color = Color(0xFF00D2FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = if (parsedEnd > parsedStart) {
+                                    "Selected Duration: ${clipDuration / 60}m ${clipDuration % 60}s (downloads only this segment)"
+                                } else {
+                                    "End time must be greater than start time"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (parsedEnd > parsedStart) Color(0xFF00D2FF) else Color(0xFFFF5252)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 7. Action Buttons: Cancel & Start Download
+            val parsedStart = if (enableClipping) parseTimeInput(clipStartText) else null
+            val parsedEnd = if (enableClipping) parseTimeInput(clipEndText) else null
+            val canDownload = !enableClipping || (parsedStart != null && parsedEnd != null && parsedEnd > parsedStart)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = Color(0xFF8E9BB0),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(2f)
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            if (canDownload) Brush.horizontalGradient(
+                                listOf(Color(0xFF00D2FF), Color(0xFF0091FF))
+                            ) else SolidColor(Color(0xFF1E2838))
+                        )
+                        .border(
+                            1.dp,
+                            if (canDownload) Color.White.copy(alpha = 0.35f) else Color.Transparent,
+                            RoundedCornerShape(16.dp)
+                        )
+                        .clickable(enabled = canDownload) {
+                            val fmt = selectedFormat ?: mediaInfo.formats.first()
+                            onConfirm(mediaInfo, fmt, isAudioOnly, selectedAudioFormat, parsedStart, parsedEnd)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (enableClipping && parsedStart != null && parsedEnd != null && parsedEnd > parsedStart) {
+                            val d = parsedEnd - parsedStart
+                            "Download Clip (${d / 60}m ${d % 60}s)"
+                        } else {
+                            "Start Download"
+                        },
+                        color = if (canDownload) Color.Black else Color(0xFF556275),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
