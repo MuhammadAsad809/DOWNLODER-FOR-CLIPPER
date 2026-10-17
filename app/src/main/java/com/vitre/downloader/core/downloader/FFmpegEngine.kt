@@ -87,6 +87,115 @@ class FFmpegEngine {
     }
 
     /**
+     * Muxes a separate video stream (e.g. 1080p DASH) and audio stream (e.g. AAC/M4A)
+     * into a unified, synchronized MP4 container without re-encoding.
+     */
+    suspend fun muxVideoAndAudio(
+        videoPath: String,
+        audioPath: String,
+        outputPath: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val outputFile = File(outputPath)
+        if (outputFile.exists()) {
+            outputFile.delete()
+        }
+
+        var videoExtractor: MediaExtractor? = null
+        var audioExtractor: MediaExtractor? = null
+        var muxer: MediaMuxer? = null
+
+        try {
+            videoExtractor = MediaExtractor().apply { setDataSource(videoPath) }
+            audioExtractor = MediaExtractor().apply { setDataSource(audioPath) }
+
+            var videoTrackIndex = -1
+            var videoFormat: MediaFormat? = null
+            for (i in 0 until videoExtractor.trackCount) {
+                val format = videoExtractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/")) {
+                    videoTrackIndex = i
+                    videoFormat = format
+                    break
+                }
+            }
+
+            var audioTrackIndex = -1
+            var audioFormat: MediaFormat? = null
+            for (i in 0 until audioExtractor.trackCount) {
+                val format = audioExtractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    audioTrackIndex = i
+                    audioFormat = format
+                    break
+                }
+            }
+
+            if (videoTrackIndex == -1 || videoFormat == null) {
+                return@withContext Result.failure(Exception("No video track found in video stream"))
+            }
+
+            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+            videoExtractor.selectTrack(videoTrackIndex)
+            val muxerVideoTrack = muxer.addTrack(videoFormat)
+
+            val muxerAudioTrack = if (audioTrackIndex != -1 && audioFormat != null) {
+                audioExtractor.selectTrack(audioTrackIndex)
+                muxer.addTrack(audioFormat)
+            } else -1
+
+            muxer.start()
+
+            // 1. Write Video Samples
+            val videoBufSize = if (videoFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                videoFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+            } else 1024 * 1024
+            val videoBuffer = ByteBuffer.allocate(videoBufSize)
+            val videoBufferInfo = MediaCodec.BufferInfo()
+
+            while (true) {
+                videoBufferInfo.offset = 0
+                videoBufferInfo.size = videoExtractor.readSampleData(videoBuffer, 0)
+                if (videoBufferInfo.size < 0) break
+                videoBufferInfo.presentationTimeUs = videoExtractor.sampleTime
+                videoBufferInfo.flags = videoExtractor.sampleFlags
+                muxer.writeSampleData(muxerVideoTrack, videoBuffer, videoBufferInfo)
+                videoExtractor.advance()
+            }
+
+            // 2. Write Audio Samples
+            if (muxerAudioTrack != -1 && audioFormat != null) {
+                val audioBufSize = if (audioFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                    audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                } else 256 * 1024
+                val audioBuffer = ByteBuffer.allocate(audioBufSize)
+                val audioBufferInfo = MediaCodec.BufferInfo()
+
+                while (true) {
+                    audioBufferInfo.offset = 0
+                    audioBufferInfo.size = audioExtractor.readSampleData(audioBuffer, 0)
+                    if (audioBufferInfo.size < 0) break
+                    audioBufferInfo.presentationTimeUs = audioExtractor.sampleTime
+                    audioBufferInfo.flags = audioExtractor.sampleFlags
+                    muxer.writeSampleData(muxerAudioTrack, audioBuffer, audioBufferInfo)
+                    audioExtractor.advance()
+                }
+            }
+
+            muxer.stop()
+            Result.success(outputPath)
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            try { videoExtractor?.release() } catch (_: Exception) {}
+            try { audioExtractor?.release() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
      * Probes media metadata using Android MediaMetadataRetriever
      */
     suspend fun probeMedia(filePath: String): Result<String> = withContext(Dispatchers.IO) {

@@ -121,17 +121,35 @@ class DownloadService : Service() {
             return
         }
 
-        // 2. Audio extraction if needed
+        val engineRes = dlResult.getOrNull()!!
         var finalFile = tempFile
+
+        // 2. Mux video and audio if downloaded as separate DASH streams
+        if (engineRes.needsMuxing && engineRes.videoPath != null && engineRes.audioPath != null) {
+            val muxNotif = createNotification(title, "Synchronizing audio & video tracks...", 95, false)
+            notificationManager.notify(NOTIFICATION_ID, muxNotif)
+
+            val muxResult = ffmpegEngine.muxVideoAndAudio(
+                videoPath = engineRes.videoPath,
+                audioPath = engineRes.audioPath,
+                outputPath = tempFile.absolutePath
+            )
+
+            // Clean up temporary audio/video parts
+            try { File(engineRes.videoPath).delete() } catch (_: Exception) {}
+            try { File(engineRes.audioPath).delete() } catch (_: Exception) {}
+        }
+
+        // 3. Audio extraction if user requested audio-only mode
         if (isAudioOnly) {
             val audioTempFile = File(tempDir, "$safeTitle.$audioFormat")
             val extractResult = ffmpegEngine.extractAudio(
-                inputPath = tempFile.absolutePath,
+                inputPath = finalFile.absolutePath,
                 outputPath = audioTempFile.absolutePath,
                 audioFormat = audioFormat
             )
             if (extractResult.isSuccess) {
-                tempFile.delete()
+                finalFile.delete()
                 finalFile = audioTempFile
             }
         }

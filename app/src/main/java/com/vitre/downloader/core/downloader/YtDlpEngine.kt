@@ -83,13 +83,20 @@ class YtDlpEngine {
             }
         }
 
+data class EngineDownloadResult(
+    val outputPath: String,
+    val needsMuxing: Boolean = false,
+    val videoPath: String? = null,
+    val audioPath: String? = null
+)
+
     suspend fun downloadMedia(
         url: String,
         formatId: String,
         outputPath: String,
         cookiesPath: String? = null,
         onProgress: (DownloadProgress) -> Unit
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<EngineDownloadResult> = withContext(Dispatchers.IO) {
         try {
             // Callback bridge from Python hook to Kotlin
             val callback = object {
@@ -125,7 +132,19 @@ class YtDlpEngine {
             if (json.has("error")) {
                 Result.failure(Exception(json.getString("error")))
             } else {
-                Result.success(json.optString("output_path", outputPath))
+                val needsMuxing = json.optBoolean("needs_muxing", false)
+                val videoPath = if (json.has("video_path")) json.getString("video_path") else null
+                val audioPath = if (json.has("audio_path")) json.getString("audio_path") else null
+                val finalOutput = json.optString("output_path", outputPath)
+
+                Result.success(
+                    EngineDownloadResult(
+                        outputPath = finalOutput,
+                        needsMuxing = needsMuxing,
+                        videoPath = videoPath,
+                        audioPath = audioPath
+                    )
+                )
             }
         } catch (e: Exception) {
             Result.failure(e)

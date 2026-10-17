@@ -50,7 +50,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
 
-    val supportedPlatforms = listOf("YouTube", "Instagram", "TikTok", "X / Twitter", "Reddit", "Vimeo", "SoundCloud")
+    val supportedPlatforms = listOf("YouTube", "TikTok", "Instagram", "X / Twitter", "Facebook", "Reddit", "Pinterest", "SoundCloud", "Vimeo")
 
     Box(modifier = modifier.fillMaxSize().background(OledBlack)) {
         LazyColumn(
@@ -279,7 +279,7 @@ fun MediaInspectionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkCharcoal,
+        containerColor = OledBlack,
         dragHandle = { BottomSheetDefaults.DragHandle(color = TextTertiary) }
     ) {
         Column(
