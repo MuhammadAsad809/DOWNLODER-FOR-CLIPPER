@@ -519,7 +519,7 @@ fun MediaInspectionSheet(
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = ElectricBlue,
-                                        unfocusedBorderColor = GlassBorder,
+                                        unfocusedBorderColor = CardBorder,
                                         focusedTextColor = TextPrimary,
                                         unfocusedTextColor = TextPrimary
                                     ),
@@ -541,7 +541,7 @@ fun MediaInspectionSheet(
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = ElectricBlue,
-                                        unfocusedBorderColor = GlassBorder,
+                                        unfocusedBorderColor = CardBorder,
                                         focusedTextColor = TextPrimary,
                                         unfocusedTextColor = TextPrimary
                                     ),

@@ -2,6 +2,7 @@ package com.vitre.downloader.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
