@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Vitre</string>
+    <string name="notification_channel_name">Vitre Active Downloads</string>
+    <string name="notification_channel_desc">Shows progress of active media downloads</string>
+</resources>

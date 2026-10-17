@@ -1,0 +1,62 @@
+// Liquid Glass AGSL Shader for Android 13+ (API 33+)
+// Provides rounded-box SDF, refraction distortion, chromatic aberration, Fresnel edge glow, and specular glare.
+
+uniform shader image;
+uniform float2 size;
+uniform float cornerRadius;
+uniform float refractionStrength;
+uniform float chromaticAberration;
+uniform float glareIntensity;
+uniform float edgeGlowIntensity;
+uniform float4 tintColor;
+
+float sdRoundedBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+half4 main(float2 fragCoord) {
+    float2 halfSize = size * 0.5;
+    float2 p = fragCoord - halfSize;
+    float r = cornerRadius;
+    
+    // Signed distance to inner edge of the rounded box
+    float d = sdRoundedBox(p, halfSize, r);
+    
+    // Outside the card
+    if (d > 0.0) {
+        return half4(0.0, 0.0, 0.0, 0.0);
+    }
+    
+    // Normalized distance from boundary [0 = edge, 1 = deep inside]
+    float edgeFactor = clamp(-d / max(r * 0.5, 1.0), 0.0, 1.0);
+    float edgeDistortion = (1.0 - edgeFactor) * refractionStrength * 40.0;
+    
+    // Refraction vector directed towards center
+    float2 normal = (length(p) > 0.001) ? normalize(p) : float2(0.0, 0.0);
+    float2 offsetCoord = fragCoord - normal * edgeDistortion;
+    
+    // Chromatic aberration (RGB channel splitting at refraction boundaries)
+    float split = chromaticAberration * edgeDistortion * 0.5;
+    half rCol = image.eval(offsetCoord - normal * split).r;
+    half gCol = image.eval(offsetCoord).g;
+    half bCol = image.eval(offsetCoord + normal * split).b;
+    half aCol = image.eval(offsetCoord).a;
+    half4 sceneColor = half4(rCol, gCol, bCol, aCol);
+    
+    // Fresnel edge glow (bright border rim)
+    float fresnel = pow(1.0 - edgeFactor, 2.5) * edgeGlowIntensity;
+    half4 glowColor = half4(0.0, 0.82, 1.0, 1.0) * fresnel; // Electric blue rim
+    
+    // Specular glare (top-left light source reflection)
+    float2 lightDir = normalize(float2(-0.7, -0.7));
+    float glare = pow(max(dot(normal, -lightDir), 0.0), 4.0) * glareIntensity * (1.0 - edgeFactor);
+    half4 glareColor = half4(1.0, 1.0, 1.0, 1.0) * glare;
+    
+    // Tint blend
+    half4 tinted = mix(sceneColor, tintColor, tintColor.a);
+    
+    // Combine layers: background + tint + fresnel edge + specular glare
+    half4 finalColor = tinted + glowColor + glareColor;
+    return clamp(finalColor, 0.0, 1.0);
+}
