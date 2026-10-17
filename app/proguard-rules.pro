@@ -1,8 +1,8 @@
 # Chaquopy ProGuard rules
 -keep class com.chaquo.python.** { *; }
 
-# Mobile-FFmpeg ProGuard rules
--keep class com.arthenica.mobileffmpeg.** { *; }
+# Media3 ProGuard rules
+-keep class androidx.media3.** { *; }
 
 # Room ProGuard rules
 -keep class * extends androidx.room.RoomDatabase

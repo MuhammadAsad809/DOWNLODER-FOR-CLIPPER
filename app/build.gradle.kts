@@ -115,8 +115,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
 
-    // FFmpeg Android Native Integration
-    implementation("com.arthenica:mobile-ffmpeg-full:4.4.LTS")
+    // Media3 Transformer for Native Media Processing
+    implementation("androidx.media3:media3-transformer:$media3Version")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
