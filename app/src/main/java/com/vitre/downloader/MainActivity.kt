@@ -80,6 +80,10 @@ class MainActivity : ComponentActivity() {
             var inspectedMedia by remember { mutableStateOf<MediaInfo?>(null) }
             var inspectionError by remember { mutableStateOf<String?>(null) }
 
+            val activeDownloadsCount = downloads.count {
+                it.status == DownloadStatus.DOWNLOADING.name || it.status == DownloadStatus.QUEUED.name
+            }
+
             VitreTheme {
                 Scaffold(
                     containerColor = OledBlack,
@@ -89,7 +93,12 @@ class MainActivity : ComponentActivity() {
                                 currentDestination = currentNav,
                                 onNavigate = { destination ->
                                     currentNav = destination
-                                }
+                                },
+                                activeDownloadsCount = activeDownloadsCount,
+                                onActionOrbClick = {
+                                    currentNav = NavDestination.HOME
+                                },
+                                modifier = Modifier.padding(bottom = 16.dp)
                             )
                         }
                     }
