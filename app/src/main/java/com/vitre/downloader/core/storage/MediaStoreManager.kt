@@ -80,4 +80,28 @@ class MediaStoreManager(private val context: Context) {
             Result.failure(e)
         }
     }
+
+    suspend fun saveToCustomFolder(
+        treeUri: Uri,
+        displayName: String,
+        mimeType: String,
+        sourceFile: File
+    ): Result<Uri> = withContext(Dispatchers.IO) {
+        try {
+            val pickedDir = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                ?: return@withContext Result.failure(Exception("Failed to access custom folder"))
+            val targetFile = pickedDir.createFile(mimeType, displayName)
+                ?: return@withContext Result.failure(Exception("Failed to create file in custom folder"))
+
+            context.contentResolver.openOutputStream(targetFile.uri)?.use { outStream ->
+                FileInputStream(sourceFile).use { inStream ->
+                    inStream.copyTo(outStream)
+                }
+            } ?: return@withContext Result.failure(Exception("Failed to open output stream"))
+
+            Result.success(targetFile.uri)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

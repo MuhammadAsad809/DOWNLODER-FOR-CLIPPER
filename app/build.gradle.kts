@@ -110,6 +110,9 @@ dependencies {
     // DataStore Preferences
     implementation("androidx.datastore:datastore-preferences:1.1.2")
 
+    // Storage Access Framework DocumentFile
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
     // Media3 ExoPlayer for Local Playback
     val media3Version = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")

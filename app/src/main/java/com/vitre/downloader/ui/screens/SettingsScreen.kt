@@ -15,6 +15,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import com.vitre.downloader.ui.components.GlassSurface
 import com.vitre.downloader.ui.theme.*
 
@@ -24,6 +30,8 @@ fun SettingsScreen(
     onQualityChange: (String) -> Unit,
     currentAudioFormat: String,
     onAudioFormatChange: (String) -> Unit,
+    customDownloadUri: String?,
+    onCustomFolderChange: (String?) -> Unit,
     glassIntensity: Float,
     onGlassIntensityChange: (Float) -> Unit,
     enableAgsl: Boolean,
@@ -33,6 +41,22 @@ fun SettingsScreen(
     onNavigateDiagnostics: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                onCustomFolderChange(uri.toString())
+            } catch (e: Exception) {
+                onCustomFolderChange(uri.toString())
+            }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(OledBlack)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
@@ -88,6 +112,64 @@ fun SettingsScreen(
                                         containerColor = CardSurface,
                                         labelColor = TextSecondary
                                     )
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(text = "Download Location", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CardSurface)
+                                .clickable { folderPickerLauncher.launch(null) }
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                val displayPath = customDownloadUri?.let { uriStr ->
+                                    try {
+                                        Uri.decode(uriStr).substringAfterLast(":")
+                                    } catch (e: Exception) {
+                                        uriStr
+                                    }
+                                } ?: "Default (/Movies/Vitre & /Music/Vitre)"
+
+                                Text(
+                                    text = if (customDownloadUri != null) "Custom Directory" else "Default Public Storage",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = displayPath,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (customDownloadUri != null) {
+                                    IconButton(onClick = { onCustomFolderChange(null) }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Reset to Default",
+                                            tint = TextTertiary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = "Choose Folder",
+                                    tint = ElectricBlue,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }

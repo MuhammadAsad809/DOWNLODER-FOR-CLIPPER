@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             val defaultAudioFormat by app.preferences.defaultAudioFormat.collectAsState(initial = "mp3")
             val glassIntensity by app.preferences.glassIntensity.collectAsState(initial = 0.7f)
             val enableAgsl by app.preferences.enableAgsl.collectAsState(initial = true)
+            val customDownloadUri by app.preferences.customDownloadUri.collectAsState(initial = null)
 
             // Navigation State
             var currentNav by remember { mutableStateOf(NavDestination.HOME) }
@@ -215,6 +216,8 @@ class MainActivity : ComponentActivity() {
                                     onQualityChange = { q -> scope.launch { app.preferences.setQuality(q) } },
                                     currentAudioFormat = defaultAudioFormat,
                                     onAudioFormatChange = { af -> scope.launch { app.preferences.setAudioFormat(af) } },
+                                    customDownloadUri = customDownloadUri,
+                                    onCustomFolderChange = { uri -> scope.launch { app.preferences.setCustomDownloadPath(uri) } },
                                     glassIntensity = glassIntensity,
                                     onGlassIntensityChange = { gi -> scope.launch { app.preferences.setGlassIntensity(gi) } },
                                     enableAgsl = enableAgsl,

@@ -19,6 +19,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import android.net.Uri
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -134,16 +136,40 @@ class DownloadService : Service() {
             }
         }
 
-        // 3. Save to Public MediaStore
+        // 3. Save to Custom Folder or Public MediaStore
         val finalDisplayName = if (isAudioOnly) "$safeTitle.$audioFormat" else "$safeTitle.mp4"
         val mimeType = if (isAudioOnly) "audio/$audioFormat" else "video/mp4"
 
-        val saveResult = mediaStoreManager.saveMediaToPublicStorage(
-            sourceFile = finalFile,
-            displayName = finalDisplayName,
-            mimeType = mimeType,
-            isVideo = !isAudioOnly
-        )
+        val prefs = (application as VitreApplication).preferences
+        val customUriStr = prefs.customDownloadUri.firstOrNull()
+        val customUri = customUriStr?.let { Uri.parse(it) }
+
+        val saveResult = if (customUri != null) {
+            val customRes = mediaStoreManager.saveToCustomFolder(
+                treeUri = customUri,
+                displayName = finalDisplayName,
+                mimeType = mimeType,
+                sourceFile = finalFile
+            )
+            // Fallback to MediaStore if custom folder access fails (e.g. unmounted SD card)
+            if (customRes.isFailure) {
+                mediaStoreManager.saveMediaToPublicStorage(
+                    sourceFile = finalFile,
+                    displayName = finalDisplayName,
+                    mimeType = mimeType,
+                    isVideo = !isAudioOnly
+                )
+            } else {
+                customRes
+            }
+        } else {
+            mediaStoreManager.saveMediaToPublicStorage(
+                sourceFile = finalFile,
+                displayName = finalDisplayName,
+                mimeType = mimeType,
+                isVideo = !isAudioOnly
+            )
+        }
 
         finalFile.delete()
 
