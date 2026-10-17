@@ -115,7 +115,9 @@ class QuickShareActivity : ComponentActivity() {
             url = info.url,
             title = displayTitle,
             thumbnail = info.thumbnail,
+            formatId = format.formatId,
             resolution = resolutionLabel,
+            filesize = format.filesize,
             status = DownloadStatus.QUEUED.name,
             progress = 0f
         )

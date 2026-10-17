@@ -27,6 +27,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.vitre.downloader.ui.components.GlassButton
+import com.vitre.downloader.ui.theme.*
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import com.vitre.downloader.core.storage.MediaResolver
