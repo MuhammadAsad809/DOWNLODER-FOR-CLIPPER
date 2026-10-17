@@ -34,6 +34,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.vitre.downloader.R
 import com.vitre.downloader.core.database.DownloadEntity
 import com.vitre.downloader.core.models.FormatOption
 import com.vitre.downloader.core.models.MediaInfo
@@ -61,7 +63,7 @@ data class SiteBrandItem(
     val code: String,
     val name: String,
     val color: Color,
-    val symbol: String,
+    val drawableRes: Int,
     val secondaryColor: Color = color
 )
 
@@ -141,18 +143,20 @@ fun HomeScreen(
 
     val supportedPlatforms = remember {
         listOf(
-            SiteBrandItem("YT", "YouTube", Color(0xFFFF0033), "▶", Color(0xFFFF4D6D)),
-            SiteBrandItem("TT", "TikTok", Color(0xFF00F2FE), "♪", Color(0xFF4FACFE)),
-            SiteBrandItem("IG", "Instagram", Color(0xFFE1306C), "◎", Color(0xFFF77737)),
-            SiteBrandItem("X", "Twitter / X", Color(0xFFFFFFFF), "𝕏", Color(0xFFAAAAAA)),
-            SiteBrandItem("FB", "Facebook", Color(0xFF1877F2), "f", Color(0xFF4292F7)),
-            SiteBrandItem("PIN", "Pinterest", Color(0xFFE60023), "📌", Color(0xFFFF334B)),
-            SiteBrandItem("RD", "Reddit", Color(0xFFFF4500), "🤖", Color(0xFFFF8547)),
-            SiteBrandItem("TW", "Twitch", Color(0xFF9146FF), "👾", Color(0xFFB57AFF)),
-            SiteBrandItem("SC", "SoundCloud", Color(0xFFFF5500), "☁", Color(0xFFFF8833)),
-            SiteBrandItem("VM", "Vimeo", Color(0xFF1AB7EA), "v", Color(0xFF4ED6FF)),
-            SiteBrandItem("BL", "Bilibili", Color(0xFF23C9ED), "📺", Color(0xFF7DE6FF)),
-            SiteBrandItem("TH", "Threads", Color(0xFFFFFFFF), "@", Color(0xFF8E9BB0))
+            SiteBrandItem("YT", "YouTube", Color(0xFFFF0033), R.drawable.ic_3d_youtube, Color(0xFFFF4D6D)),
+            SiteBrandItem("TT", "TikTok", Color(0xFF00F2FE), R.drawable.ic_3d_tiktok, Color(0xFF4FACFE)),
+            SiteBrandItem("IG", "Instagram", Color(0xFFE1306C), R.drawable.ic_3d_instagram, Color(0xFFF77737)),
+            SiteBrandItem("X", "Twitter / X", Color(0xFFFFFFFF), R.drawable.ic_3d_x, Color(0xFFAAAAAA)),
+            SiteBrandItem("FB", "Facebook", Color(0xFF1877F2), R.drawable.ic_3d_facebook, Color(0xFF4292F7)),
+            SiteBrandItem("PIN", "Pinterest", Color(0xFFE60023), R.drawable.ic_3d_pinterest, Color(0xFFFF334B)),
+            SiteBrandItem("RD", "Reddit", Color(0xFFFF4500), R.drawable.ic_3d_reddit, Color(0xFFFF8547)),
+            SiteBrandItem("TW", "Twitch", Color(0xFF9146FF), R.drawable.ic_3d_twitch, Color(0xFFB57AFF)),
+            SiteBrandItem("SC", "SoundCloud", Color(0xFFFF5500), R.drawable.ic_3d_soundcloud, Color(0xFFFF8833)),
+            SiteBrandItem("TG", "Telegram", Color(0xFF26A5E4), R.drawable.ic_3d_telegram, Color(0xFF5AC8FA)),
+            SiteBrandItem("SNAP", "Snapchat", Color(0xFFFFFC00), R.drawable.ic_3d_snapchat, Color(0xFFFFD60A)),
+            SiteBrandItem("SPOT", "Spotify", Color(0xFF1ED760), R.drawable.ic_3d_spotify, Color(0xFF30D158)),
+            SiteBrandItem("DC", "Discord", Color(0xFF5865F2), R.drawable.ic_3d_discord, Color(0xFF7289DA)),
+            SiteBrandItem("IN", "LinkedIn", Color(0xFF0A66C2), R.drawable.ic_3d_linkedin, Color(0xFF0077B5))
         )
     }
 
@@ -177,7 +181,7 @@ fun HomeScreen(
             contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. Top Header: Vitre Brand Badge + Status Indicators
+            // 1. Top Header: Minimalist Luxury Brand
             item {
                 Row(
                     modifier = Modifier
@@ -192,32 +196,33 @@ fun HomeScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(10.dp)
+                                .size(9.dp)
                                 .clip(CircleShape)
                                 .background(Color(0xFF00D2FF))
                         )
                         Text(
                             text = "Vitre",
                             color = Color(0xFF00D2FF),
-                            fontSize = 21.sp,
-                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp
                         )
                     }
 
-                    // Native Liquid Glass Engine Pill Tag
+                    // Sleek Minimal Premium Badge
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF00D2FF).copy(alpha = 0.12f))
+                            .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 9.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = "iOS 26 Engine",
-                            color = Color(0xFF8E9BB0),
+                            text = "PRO",
+                            color = Color(0xFF00D2FF),
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.sp
                         )
                     }
                 }
@@ -679,7 +684,7 @@ fun HeroGlowingLogosRow(platforms: List<SiteBrandItem>) {
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                site.color.copy(alpha = 0.3f),
+                                site.color.copy(alpha = 0.25f),
                                 Color(0xFF141926).copy(alpha = 0.95f),
                                 Color(0xFF0C101A)
                             )
@@ -697,11 +702,10 @@ fun HeroGlowingLogosRow(platforms: List<SiteBrandItem>) {
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = site.symbol,
-                    color = site.color,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.ExtraBold
+                Image(
+                    painter = painterResource(id = site.drawableRes),
+                    contentDescription = site.name,
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
@@ -756,7 +760,7 @@ fun Glass3DSiteLogoCard(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            site.color.copy(alpha = 0.25f),
+                            site.color.copy(alpha = 0.22f),
                             Color(0xFF141B29).copy(alpha = 0.92f),
                             Color(0xFF090D14)
                         ),
@@ -777,11 +781,10 @@ fun Glass3DSiteLogoCard(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = site.symbol,
-                color = site.color,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Black
+            Image(
+                painter = painterResource(id = site.drawableRes),
+                contentDescription = site.name,
+                modifier = Modifier.size(34.dp)
             )
         }
 
