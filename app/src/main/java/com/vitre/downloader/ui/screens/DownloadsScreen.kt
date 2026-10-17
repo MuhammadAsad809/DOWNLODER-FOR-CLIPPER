@@ -25,9 +25,11 @@ import coil.compose.AsyncImage
 import com.vitre.downloader.core.database.DownloadEntity
 import com.vitre.downloader.core.downloader.DownloadService
 import com.vitre.downloader.core.models.DownloadStatus
+import com.vitre.downloader.core.storage.MediaResolver
 import com.vitre.downloader.ui.components.GlassButton
 import com.vitre.downloader.ui.components.GlassSurface
 import com.vitre.downloader.ui.theme.*
+import java.io.File
 
 @Composable
 fun DownloadsScreen(
@@ -283,12 +285,23 @@ fun CompletedDownloadCard(
             }
 
             IconButton(onClick = {
-                val uri = item.mediaUri?.let { Uri.parse(it) }
-                if (uri != null) {
+                val rawUri = item.mediaUri?.let { Uri.parse(it) }
+                if (rawUri != null) {
                     try {
+                        val safeUri = if (rawUri.scheme == "file") {
+                            val f = File(rawUri.path ?: "")
+                            if (f.exists()) MediaResolver.getShareableUri(context, f) else rawUri
+                        } else rawUri
+
                         val isAudio = item.resolution.contains("audio", ignoreCase = true)
+                        val isImage = item.resolution.contains("image", ignoreCase = true)
+                        val mime = when {
+                            isImage -> "image/*"
+                            isAudio -> "audio/*"
+                            else -> "video/*"
+                        }
                         val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, if (isAudio) "audio/*" else "video/*")
+                            setDataAndType(safeUri, mime)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
                         context.startActivity(Intent.createChooser(intent, "Open with"))

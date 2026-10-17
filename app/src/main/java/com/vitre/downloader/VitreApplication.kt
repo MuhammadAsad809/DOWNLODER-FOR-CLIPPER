@@ -9,8 +9,13 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.vitre.downloader.core.database.AppDatabase
 import com.vitre.downloader.core.preferences.VitrePreferences
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class VitreApplication : Application() {
+
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     lateinit var database: AppDatabase
         private set

@@ -7,7 +7,8 @@ data class MediaInfo(
     val uploader: String,
     val extractor: String,
     val url: String,
-    val formats: List<FormatOption>
+    val formats: List<FormatOption>,
+    val isImagePost: Boolean = false
 )
 
 data class FormatOption(
@@ -23,7 +24,8 @@ data class FormatOption(
     val fps: Double,
     val tbr: Double,
     val directUrl: String = "",
-    val needsAudio: Boolean = false
+    val needsAudio: Boolean = false,
+    val isImage: Boolean = false
 ) {
     val displaySize: String
         get() = if (filesize > 0) {

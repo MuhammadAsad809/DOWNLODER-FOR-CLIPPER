@@ -18,20 +18,21 @@ class MediaStoreManager(private val context: Context) {
         sourceFile: File,
         displayName: String,
         mimeType: String,
-        isVideo: Boolean
+        isVideo: Boolean,
+        isImage: Boolean = false
     ): Result<Uri> = withContext(Dispatchers.IO) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val collection = if (isVideo) {
-                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val collection = when {
+                    isImage -> MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    isVideo -> MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                    else -> MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 }
 
-                val relativePath = if (isVideo) {
-                    "${Environment.DIRECTORY_MOVIES}/Vitre"
-                } else {
-                    "${Environment.DIRECTORY_MUSIC}/Vitre"
+                val relativePath = when {
+                    isImage -> "${Environment.DIRECTORY_PICTURES}/Vitre"
+                    isVideo -> "${Environment.DIRECTORY_MOVIES}/Vitre"
+                    else -> "${Environment.DIRECTORY_MUSIC}/Vitre"
                 }
 
                 val values = ContentValues().apply {
@@ -58,7 +59,11 @@ class MediaStoreManager(private val context: Context) {
                 Result.success(uri)
             } else {
                 // Android 8 / 9 Fallback
-                val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val baseDir = when {
+                    isImage -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                    isVideo -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                    else -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                }
                 val targetDir = File(baseDir, "Vitre").apply { mkdirs() }
                 val targetFile = File(targetDir, displayName)
 

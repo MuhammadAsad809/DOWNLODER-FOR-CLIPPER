@@ -24,6 +24,7 @@ import com.vitre.downloader.core.downloader.DownloadService
 import com.vitre.downloader.core.downloader.YtDlpEngine
 import com.vitre.downloader.core.models.DownloadStatus
 import com.vitre.downloader.core.models.MediaInfo
+import com.vitre.downloader.core.storage.MediaResolver
 import com.vitre.downloader.ui.components.AdaptivePillNavBar
 import com.vitre.downloader.ui.components.NavDestination
 import com.vitre.downloader.ui.screens.*
@@ -187,7 +188,8 @@ class MainActivity : ComponentActivity() {
                                                 isAudioOnly = isAudioOnly,
                                                 audioFormat = audioFormat,
                                                 clipStart = clipStart,
-                                                clipEnd = clipEnd
+                                                clipEnd = clipEnd,
+                                                isImage = format.isImage
                                             )
 
                                             // 3. Switch tab to Downloads
@@ -206,9 +208,22 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { app.database.downloadDao().deleteDownload(item) }
                                     },
                                     onPlayMedia = { item ->
-                                        // Open media player with downloaded local mediaUri or fallback
-                                        val uri = item.mediaUri?.let { Uri.parse(it) } ?: Uri.parse(item.url)
-                                        activePlayerUri = Pair(item.title, uri)
+                                        scope.launch {
+                                            val resolved = MediaResolver.resolveMediaUri(
+                                                context = this@MainActivity,
+                                                item = item,
+                                                downloadDao = app.database.downloadDao()
+                                            )
+                                            if (resolved != null) {
+                                                activePlayerUri = Pair(item.title, resolved)
+                                            } else {
+                                                android.widget.Toast.makeText(
+                                                    this@MainActivity,
+                                                    "Media file not found on device storage",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
                                     }
                                 )
                             }

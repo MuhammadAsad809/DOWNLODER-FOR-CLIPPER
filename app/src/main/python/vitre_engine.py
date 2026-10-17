@@ -126,7 +126,10 @@ def inspect_url(url, cookies_path=None):
         'ignoreerrors': False,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web']
+                'player_client': ['visionos', 'web']
+            },
+            'instagram': {
+                'api': ['graphql', 'web']
             }
         },
         'http_headers': {
@@ -153,7 +156,53 @@ def inspect_url(url, cookies_path=None):
         if tiktok_res:
             return json.dumps(tiktok_res)
 
+    # Direct image detection fallback (Pinterest, i.redd.it, Twitter images, Unsplash, direct jpg/png)
     if not info:
+        url_lower = canonical_url.lower().split('?')[0]
+        image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
+        is_image_url = any(url_lower.endswith(ext) for ext in image_exts) or \
+                       any(dom in canonical_url.lower() for dom in ['pinimg.com', 'i.redd.it', 'images.unsplash.com', 'imgur.com', 'pbs.twimg.com'])
+
+        if is_image_url:
+            try:
+                img_req = urllib.request.Request(canonical_url, headers={'User-Agent': DEFAULT_USER_AGENT})
+                with urllib.request.urlopen(img_req, timeout=10) as resp:
+                    c_type = resp.headers.get('content-type', '').lower()
+                    c_len = int(resp.headers.get('content-length', 0))
+                    if 'image' in c_type or is_image_url:
+                        ext = 'jpg'
+                        for candidate in ['png', 'webp', 'gif', 'jpeg', 'jpg']:
+                            if candidate in c_type or url_lower.endswith(f'.{candidate}'):
+                                ext = candidate
+                                break
+                        return json.dumps({
+                            "title": "Photo / Image Asset",
+                            "thumbnail": canonical_url,
+                            "duration": 0,
+                            "uploader": "Web Image",
+                            "extractor": "image_direct",
+                            "url": canonical_url,
+                            "is_image_post": True,
+                            "formats": [{
+                                "format_id": "direct_image",
+                                "ext": ext,
+                                "resolution": "Original Image",
+                                "height": 0,
+                                "filesize": c_len,
+                                "is_video": False,
+                                "is_audio": False,
+                                "is_image": True,
+                                "vcodec": "none",
+                                "acodec": "none",
+                                "fps": 0,
+                                "tbr": 0,
+                                "needs_audio": False,
+                                "direct_url": canonical_url
+                            }]
+                        })
+            except Exception:
+                pass
+
         # Attempt TikTok fallback if error occurred
         if is_tiktok:
             tiktok_res = extract_tiktok_fallback(canonical_url)
@@ -181,20 +230,25 @@ def inspect_url(url, cookies_path=None):
 
         is_video = vcodec != 'none'
         is_audio = acodec != 'none'
+        is_image = (ext in ['jpg', 'jpeg', 'png', 'webp', 'gif'] or 'image' in str(fid).lower()) and not is_video and not is_audio
+        if is_image and (not ext or ext in ['unknown_video', 'none', 'mp4']):
+            ext = 'jpg'
 
         # Skip ByteVC1/H.265 TikTok formats if standard H.264 is available
         if 'bytevc1' in vcodec:
             continue
 
-        # Format label (e.g. 1080p, 720p, 480p, Audio Only)
+        # Format label (e.g. 1080p, 720p, 480p, Audio Only, Image)
         if is_video and height:
             resolution_label = f"{height}p"
         elif is_audio and not is_video:
             resolution_label = f"Audio ({ext})"
+        elif is_image:
+            resolution_label = f"Image ({ext.upper()})"
         else:
             resolution_label = ext
 
-        combo_key = (resolution_label, ext, is_video, is_audio)
+        combo_key = (resolution_label, ext, is_video, is_audio, is_image)
         if combo_key in seen_combos:
             continue
         seen_combos.add(combo_key)
@@ -207,6 +261,7 @@ def inspect_url(url, cookies_path=None):
             "filesize": filesize or 0,
             "is_video": is_video,
             "is_audio": is_audio,
+            "is_image": is_image,
             "vcodec": vcodec,
             "acodec": acodec,
             "fps": fps or 0,
@@ -215,11 +270,45 @@ def inspect_url(url, cookies_path=None):
             "direct_url": f.get('url') or ''
         })
 
+    # Fallback for direct image posts (Pinterest, Unsplash, Instagram photos)
+    if not formats and (info.get('url') or info.get('thumbnail')):
+        direct_img = info.get('url') or info.get('thumbnail')
+        img_ext = info.get('ext') or 'jpg'
+        if img_ext in ['unknown_video', 'none', 'mp4']:
+            img_ext = 'jpg'
+        formats.append({
+            "format_id": "direct_image",
+            "ext": img_ext,
+            "resolution": "Original Image",
+            "height": info.get('height') or 0,
+            "filesize": info.get('filesize') or 0,
+            "is_video": False,
+            "is_audio": False,
+            "is_image": True,
+            "vcodec": "none",
+            "acodec": "none",
+            "fps": 0,
+            "tbr": 0,
+            "needs_audio": False,
+            "direct_url": direct_img
+        })
+
+    # Sort formats: Video (highest resolution first), then Images (largest first), then Audio
+    def format_sort_key(item):
+        cat = 0 if item.get('is_video') else (1 if item.get('is_image') else 2)
+        h = item.get('height') or 0
+        sz = item.get('filesize') or 0
+        return (cat, -h, -sz)
+
+    formats.sort(key=format_sort_key)
+
     # If no formats extracted but it's TikTok, fallback
     if not formats and is_tiktok:
         tiktok_res = extract_tiktok_fallback(canonical_url)
         if tiktok_res:
             return json.dumps(tiktok_res)
+
+    is_image_post = any(f.get('is_image') for f in formats) and not any(f.get('is_video') for f in formats)
 
     result = {
         "title": info.get('title', 'Unknown Title'),
@@ -228,6 +317,7 @@ def inspect_url(url, cookies_path=None):
         "uploader": info.get('uploader') or info.get('channel', 'Unknown'),
         "extractor": info.get('extractor', 'generic'),
         "url": canonical_url,
+        "is_image_post": is_image_post,
         "formats": formats
     }
     return json.dumps(result)
@@ -245,7 +335,33 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
     canonical_url = resolve_url(url)
     is_tiktok = any(k in canonical_url.lower() for k in ['tiktok.com', 'musical.ly'])
 
-    # 1. Handle TikTok Fallback downloads
+    # 1. Handle Direct Image / Image Post downloads
+    if format_id == 'direct_image' or (format_id and format_id.startswith('http')):
+        direct_target = format_id if format_id.startswith('http') else None
+        if not direct_target:
+            try:
+                inspect_opts = {
+                    'no_warnings': True,
+                    'quiet': True,
+                    'skip_download': True,
+                    'http_headers': {'User-Agent': DEFAULT_USER_AGENT}
+                }
+                if cookies_path and os.path.exists(cookies_path):
+                    inspect_opts['cookiefile'] = cookies_path
+                with yt_dlp.YoutubeDL(inspect_opts) as ydl:
+                    info = ydl.extract_info(canonical_url, download=False)
+                    direct_target = info.get('url') or info.get('thumbnail')
+            except Exception:
+                pass
+        if direct_target:
+            download_stream_chunked(direct_target, output_path, callback)
+            return json.dumps({
+                "success": True,
+                "needs_muxing": False,
+                "output_path": output_path
+            })
+
+    # 2. Handle TikTok Fallback downloads
     if format_id == 'hd_no_watermark' or is_tiktok:
         try:
             tiktok_meta = extract_tiktok_fallback(canonical_url)
@@ -259,7 +375,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         except Exception:
             pass # Fallback to standard yt-dlp if direct stream fails
 
-    # 2. Inspect format to check if video-only
+    # 3. Inspect format to check if video-only
     def make_hook(phase="video"):
         def hook(d):
             if callback:
@@ -279,7 +395,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         'quiet': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web']
+                'player_client': ['visionos', 'web']
             },
             'instagram': {
                 'api': ['graphql', 'web']

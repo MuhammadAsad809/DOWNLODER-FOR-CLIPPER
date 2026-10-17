@@ -27,7 +27,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.vitre.downloader.ui.components.GlassButton
-import com.vitre.downloader.ui.theme.*
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import com.vitre.downloader.core.storage.MediaResolver
+import java.io.File
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -41,52 +44,87 @@ fun MediaPlayerScreen(
     var playbackError by remember { mutableStateOf<String?>(null) }
     var isBuffering by remember { mutableStateOf(true) }
 
-    val exoPlayer = remember(mediaUri) {
-        ExoPlayer.Builder(context).build().apply {
-            val item = MediaItem.fromUri(mediaUri)
-            setMediaItem(item)
-            prepare()
-            playWhenReady = true
+    val uriStr = mediaUri.toString().lowercase()
+    val isImage = uriStr.endsWith(".jpg") || uriStr.endsWith(".jpeg") || uriStr.endsWith(".png") ||
+                  uriStr.endsWith(".webp") || uriStr.contains("image")
+    val isAudio = uriStr.endsWith(".mp3") || uriStr.endsWith(".m4a") || uriStr.endsWith(".opus") || uriStr.contains("audio")
+
+    val exoPlayer = remember(mediaUri, isImage) {
+        if (!isImage) {
+            ExoPlayer.Builder(context).build().apply {
+                val item = MediaItem.fromUri(mediaUri)
+                setMediaItem(item)
+                prepare()
+                playWhenReady = true
+            }
+        } else {
+            null
         }
     }
 
     DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-                playbackError = error.localizedMessage ?: "Unable to play video directly in player"
-                isBuffering = false
-            }
+        if (exoPlayer != null) {
+            val listener = object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    playbackError = error.localizedMessage ?: "Unable to play video directly in player"
+                    isBuffering = false
+                }
 
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                isBuffering = playbackState == Player.STATE_BUFFERING
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    isBuffering = playbackState == Player.STATE_BUFFERING
+                }
             }
+            exoPlayer.addListener(listener)
+
+            onDispose {
+                exoPlayer.removeListener(listener)
+                exoPlayer.release()
+            }
+        } else {
+            isBuffering = false
+            onDispose {}
         }
-        exoPlayer.addListener(listener)
+    }
 
-        onDispose {
-            exoPlayer.removeListener(listener)
-            exoPlayer.release()
+    fun getSafeUri(): Uri {
+        return if (mediaUri.scheme == "file") {
+            val file = File(mediaUri.path ?: "")
+            if (file.exists()) MediaResolver.getShareableUri(context, file) else mediaUri
+        } else {
+            mediaUri
         }
     }
 
     fun openInExternalApp() {
         try {
+            val safeUri = getSafeUri()
+            val mime = when {
+                isImage -> "image/*"
+                isAudio -> "audio/*"
+                else -> "video/*"
+            }
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(mediaUri, "video/*")
+                setDataAndType(safeUri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "Play with"))
+            context.startActivity(Intent.createChooser(intent, "Open with"))
         } catch (_: Exception) {}
     }
 
     fun shareMedia() {
         try {
+            val safeUri = getSafeUri()
+            val mime = when {
+                isImage -> "image/*"
+                isAudio -> "audio/*"
+                else -> "video/*"
+            }
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "video/*"
-                putExtra(Intent.EXTRA_STREAM, mediaUri)
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, safeUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "Share video"))
+            context.startActivity(Intent.createChooser(intent, "Share media"))
         } catch (_: Exception) {}
     }
 
@@ -129,18 +167,27 @@ fun MediaPlayerScreen(
                     .background(OledBlack),
                 contentAlignment = Alignment.Center
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            player = exoPlayer
-                            useController = true
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (isImage) {
+                    AsyncImage(
+                        model = mediaUri,
+                        contentDescription = title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                player = exoPlayer
+                                useController = true
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
 
-                if (isBuffering && playbackError == null) {
-                    CircularProgressIndicator(color = ElectricBlue)
+                    if (isBuffering && playbackError == null) {
+                        CircularProgressIndicator(color = ElectricBlue)
+                    }
                 }
 
                 if (playbackError != null) {

@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import com.vitre.downloader.MainActivity
 import com.vitre.downloader.R
 import com.vitre.downloader.VitreApplication
+import com.vitre.downloader.core.auth.CookieManager
 import com.vitre.downloader.core.database.DownloadEntity
 import com.vitre.downloader.core.models.DownloadStatus
 import com.vitre.downloader.core.storage.MediaStoreManager
@@ -55,6 +56,7 @@ class DownloadService : Service() {
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Downloading Media"
         val formatId = intent.getStringExtra(EXTRA_FORMAT_ID) ?: ""
         val isAudioOnly = intent.getBooleanExtra(EXTRA_IS_AUDIO, false)
+        val isImage = intent.getBooleanExtra(EXTRA_IS_IMAGE, false)
         val audioFormat = intent.getStringExtra(EXTRA_AUDIO_FORMAT) ?: "mp3"
         val downloadId = intent.getLongExtra(EXTRA_DOWNLOAD_ID, System.currentTimeMillis())
         val clipStart = if (intent.hasExtra(EXTRA_CLIP_START)) intent.getLongExtra(EXTRA_CLIP_START, -1L).takeIf { it >= 0 } else null
@@ -63,7 +65,7 @@ class DownloadService : Service() {
         startForegroundServiceNotification(title)
 
         serviceScope.launch {
-            processDownload(downloadId, url, title, formatId, isAudioOnly, audioFormat, clipStart, clipEnd)
+            processDownload(downloadId, url, title, formatId, isAudioOnly, isImage, audioFormat, clipStart, clipEnd)
         }
 
         return START_NOT_STICKY
@@ -88,6 +90,7 @@ class DownloadService : Service() {
         title: String,
         formatId: String,
         isAudioOnly: Boolean,
+        isImage: Boolean,
         audioFormat: String,
         clipStart: Long?,
         clipEnd: Long?
@@ -99,12 +102,13 @@ class DownloadService : Service() {
         val tempDir = File(cacheDir, "downloads").apply { mkdirs() }
         val tempFile = File(tempDir, "$safeTitle.tmp")
 
-        // 1. Download via yt-dlp
+        // 1. Download via yt-dlp with imported cookies support
+        val cookiesPath = CookieManager(this).getCookieFilePath()
         val dlResult = ytDlpEngine.downloadMedia(
             url = url,
             formatId = formatId,
             outputPath = tempFile.absolutePath,
-            cookiesPath = null,
+            cookiesPath = cookiesPath,
             clipStart = clipStart,
             clipEnd = clipEnd
         ) { progress ->
@@ -179,13 +183,15 @@ class DownloadService : Service() {
         }
 
         // 5. Detect container type to ensure correct extension and MIME type
-        val isWebMFile = isWebM(finalFile)
+        val isWebMFile = if (!isImage) isWebM(finalFile) else false
         val ext = when {
+            isImage -> if (formatId.endsWith("png") || title.endsWith(".png", true)) "png" else "jpg"
             isAudioOnly -> audioFormat
             isWebMFile -> "webm"
             else -> "mp4"
         }
         val mimeType = when {
+            isImage -> if (ext == "png") "image/png" else "image/jpeg"
             isAudioOnly -> "audio/$audioFormat"
             isWebMFile -> "video/webm"
             else -> "video/mp4"
@@ -211,7 +217,8 @@ class DownloadService : Service() {
                     sourceFile = finalFile,
                     displayName = finalDisplayName,
                     mimeType = mimeType,
-                    isVideo = !isAudioOnly
+                    isVideo = !isAudioOnly && !isImage,
+                    isImage = isImage
                 )
             } else {
                 customRes
@@ -221,7 +228,8 @@ class DownloadService : Service() {
                 sourceFile = finalFile,
                 displayName = finalDisplayName,
                 mimeType = mimeType,
-                isVideo = !isAudioOnly
+                isVideo = !isAudioOnly && !isImage,
+                isImage = isImage
             )
         }
 
@@ -306,6 +314,7 @@ class DownloadService : Service() {
         const val EXTRA_TITLE = "EXTRA_TITLE"
         const val EXTRA_FORMAT_ID = "EXTRA_FORMAT_ID"
         const val EXTRA_IS_AUDIO = "EXTRA_IS_AUDIO"
+        const val EXTRA_IS_IMAGE = "EXTRA_IS_IMAGE"
         const val EXTRA_AUDIO_FORMAT = "EXTRA_AUDIO_FORMAT"
         const val EXTRA_CLIP_START = "EXTRA_CLIP_START"
         const val EXTRA_CLIP_END = "EXTRA_CLIP_END"
@@ -319,7 +328,8 @@ class DownloadService : Service() {
             isAudioOnly: Boolean,
             audioFormat: String,
             clipStart: Long? = null,
-            clipEnd: Long? = null
+            clipEnd: Long? = null,
+            isImage: Boolean = false
         ) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 putExtra(EXTRA_DOWNLOAD_ID, id)
@@ -327,6 +337,7 @@ class DownloadService : Service() {
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_FORMAT_ID, formatId)
                 putExtra(EXTRA_IS_AUDIO, isAudioOnly)
+                putExtra(EXTRA_IS_IMAGE, isImage)
                 putExtra(EXTRA_AUDIO_FORMAT, audioFormat)
                 if (clipStart != null) putExtra(EXTRA_CLIP_START, clipStart)
                 if (clipEnd != null) putExtra(EXTRA_CLIP_END, clipEnd)

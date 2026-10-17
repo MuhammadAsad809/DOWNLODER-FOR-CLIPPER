@@ -268,11 +268,16 @@ fun MediaInspectionSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var isAudioOnly by remember { mutableStateOf(false) }
 
+    val isImageOnly = remember(mediaInfo) { mediaInfo.isImagePost || (mediaInfo.formats.any { it.isImage } && !mediaInfo.formats.any { it.isVideo }) }
     val videoFormats = remember(mediaInfo) { mediaInfo.formats.filter { it.isVideo } }
     val audioFormats = remember(mediaInfo) { mediaInfo.formats.filter { it.isAudio && !it.isVideo } }
+    val imageFormats = remember(mediaInfo) { mediaInfo.formats.filter { it.isImage } }
 
     var selectedFormat by remember {
-        mutableStateOf(videoFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
+        mutableStateOf(
+            if (isImageOnly) (imageFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
+            else (videoFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
+        )
     }
     var selectedAudioFormat by remember { mutableStateOf("mp3") }
 
@@ -355,57 +360,93 @@ fun MediaInspectionSheet(
             Spacer(modifier = Modifier.height(20.dp))
 
             // Video vs Audio Toggle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(CardSurface)
-                    .padding(4.dp)
-            ) {
-                Box(
+            if (!isImageOnly) {
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (!isAudioOnly) ElectricBlue else Color.Transparent)
-                        .clickable { isAudioOnly = false }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(CardSurface)
+                        .padding(4.dp)
                 ) {
-                    Text(
-                        text = "Video",
-                        color = if (!isAudioOnly) OledBlack else TextSecondary,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (!isAudioOnly) ElectricBlue else Color.Transparent)
+                            .clickable { isAudioOnly = false }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Video",
+                            color = if (!isAudioOnly) OledBlack else TextSecondary,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isAudioOnly) ElectricBlue else Color.Transparent)
-                        .clickable { isAudioOnly = true }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Audio Only",
-                        color = if (isAudioOnly) OledBlack else TextSecondary,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isAudioOnly) ElectricBlue else Color.Transparent)
+                            .clickable { isAudioOnly = true }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Audio Only",
+                            color = if (isAudioOnly) OledBlack else TextSecondary,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
+                Spacer(modifier = Modifier.height(20.dp))
             }
-
-            Spacer(modifier = Modifier.height(20.dp))
 
             // Format Options Selection
             Text(
-                text = if (isAudioOnly) "Select Audio Format" else "Select Resolution",
+                text = when {
+                    isImageOnly -> "Select Image Quality"
+                    isAudioOnly -> "Select Audio Format"
+                    else -> "Select Resolution"
+                },
                 style = MaterialTheme.typography.titleSmall,
                 color = TextSecondary
             )
             Spacer(modifier = Modifier.height(10.dp))
 
-            if (!isAudioOnly) {
+            if (isImageOnly) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(imageFormats) { fmt ->
+                        val isSelected = selectedFormat == fmt
+                        GlassSurface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { selectedFormat = fmt },
+                            cornerRadius = 14.dp,
+                            elevation = if (isSelected) 4.dp else 1.dp
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .background(if (isSelected) ElectricBlueGlow else Color.Transparent)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = fmt.resolution,
+                                    color = if (isSelected) ElectricBlue else TextPrimary,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = fmt.displaySize,
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (!isAudioOnly) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(videoFormats) { fmt ->
                         val isSelected = selectedFormat == fmt
@@ -461,12 +502,13 @@ fun MediaInspectionSheet(
             }
 
             // Video Clipper Controls
-            Spacer(modifier = Modifier.height(18.dp))
-            GlassSurface(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 16.dp,
-                elevation = 2.dp
-            ) {
+            if (!isImageOnly && !isAudioOnly) {
+                Spacer(modifier = Modifier.height(18.dp))
+                GlassSurface(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 16.dp,
+                    elevation = 2.dp
+                ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -595,6 +637,7 @@ fun MediaInspectionSheet(
                         )
                     }
                 }
+            }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

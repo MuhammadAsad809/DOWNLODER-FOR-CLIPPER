@@ -42,6 +42,7 @@ class YtDlpEngine {
                 val uploader = json.optString("uploader", "Unknown")
                 val extractor = json.optString("extractor", "generic")
                 val webUrl = json.optString("url", url)
+                val isImagePost = json.optBoolean("is_image_post", false)
 
                 val formatsArray = json.optJSONArray("formats")
                 val formatsList = mutableListOf<FormatOption>()
@@ -63,7 +64,8 @@ class YtDlpEngine {
                                 fps = f.optDouble("fps", 0.0),
                                 tbr = f.optDouble("tbr", 0.0),
                                 directUrl = f.optString("direct_url", ""),
-                                needsAudio = f.optBoolean("needs_audio", false)
+                                needsAudio = f.optBoolean("needs_audio", false),
+                                isImage = f.optBoolean("is_image", false)
                             )
                         )
                     }
@@ -77,7 +79,8 @@ class YtDlpEngine {
                         uploader = uploader,
                         extractor = extractor,
                         url = webUrl,
-                        formats = formatsList
+                        formats = formatsList,
+                        isImagePost = isImagePost
                     )
                 )
             } catch (e: Exception) {
