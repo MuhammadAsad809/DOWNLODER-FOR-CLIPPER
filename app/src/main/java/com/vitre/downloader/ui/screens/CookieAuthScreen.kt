@@ -317,7 +317,7 @@ fun CookieAuthScreen(
                             hasCookies = true
                             activeDomains = cookieManager.getActiveDomains()
                             isError = false
-                            importStatusMessage = "Successfully captured $count session cookies for $title!"
+                            importStatusMessage = "Successfully captured $count session cookies for $targetTitle!"
                         } else {
                             isError = true
                             importStatusMessage = res.exceptionOrNull()?.message ?: "Failed to save session cookies."
