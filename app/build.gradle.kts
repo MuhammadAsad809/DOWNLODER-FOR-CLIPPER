@@ -121,6 +121,9 @@ dependencies {
     // Media3 Transformer for Native Media Processing
     implementation("androidx.media3:media3-transformer:$media3Version")
 
+    // Chrome Custom Tabs for trusted browser auth (Google blocks WebView sign-in)
+    implementation("androidx.browser:browser:1.8.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

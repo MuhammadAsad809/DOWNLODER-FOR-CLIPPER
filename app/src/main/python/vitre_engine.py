@@ -145,14 +145,6 @@ def inspect_url(url, cookies_path=None):
         'no_warnings': True,
         'quiet': True,
         'ignoreerrors': False,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios', 'web']
-            },
-            'instagram': {
-                'api': ['graphql', 'web']
-            }
-        },
         'http_headers': {
             'User-Agent': DEFAULT_USER_AGENT,
             'Accept-Language': 'en-US,en;q=0.9',
@@ -255,12 +247,23 @@ def inspect_url(url, cookies_path=None):
         tbr = f.get('tbr') or 0
         vbr = f.get('vbr') or 0
         abr = f.get('abr') or 0
+        format_note = str(f.get('format_note') or '').lower()
 
-        is_video = vcodec != 'none'
-        is_audio = acodec != 'none'
-        is_image = (ext in ['jpg', 'jpeg', 'png', 'webp', 'gif'] or 'image' in str(fid).lower()) and not is_video and not is_audio
+        is_audio = (acodec != 'none') and (vcodec == 'none' or 'audio' in str(fid).lower())
+        is_image = (ext in ['jpg', 'jpeg', 'png', 'webp', 'gif'] or 'image' in str(fid).lower()) and not is_audio
         if is_image and (not ext or ext in ['unknown_video', 'none', 'mp4']):
             ext = 'jpg'
+
+        # Detect video formats even when vcodec is unspecified by CDN (e.g. Instagram progressive mp4s, Reddit, Twitter)
+        is_dash_video = ('dash' in str(fid).lower() and str(fid).endswith('v')) or ('dash video' in format_note)
+        is_video = (vcodec != 'none') or (ext in ['mp4', 'm4v', 'webm', 'mkv', 'mov', '3gp', 'flv'] and not is_audio and not is_image)
+
+        # Fallback to container/post dimensions when individual stream metadata lacks height/width
+        if is_video:
+            if not height or height == 0:
+                height = info.get('height') or 0
+            if not width or width == 0:
+                width = info.get('width') or 0
 
         # Skip ByteVC1/H.265 TikTok formats if standard H.264 is available
         if 'bytevc1' in vcodec:
@@ -305,8 +308,13 @@ def inspect_url(url, cookies_path=None):
             resolution_label = ext
             combo_key = (resolution_label, ext)
 
-        # Quality scoring: strongly prefer progressive streams with sound so videos have working audio out-of-the-box
-        audio_bonus = 2000 if (is_video and is_audio) else 0
+        # Progressive videos with audio (e.g. Instagram format 0, standard mp4) or formats with audio track
+        has_sound = (is_video and not is_dash_video and (acodec != 'none' or not has_standalone_audio)) or is_audio
+        audio_bonus = 2000 if has_sound else 0
+        # Heavily penalize silent DASH video streams if there are no standalone audio streams to mux with
+        if is_dash_video and not has_standalone_audio:
+            audio_bonus = -5000
+
         codec_bonus = 50 if ('avc1' in vcodec or 'h264' in vcodec or 'mp4a' in acodec or 'aac' in acodec) else 0
         total_bitrate = tbr or (vbr + abr)
         quality_score = (audio_bonus + total_bitrate + codec_bonus, filesize, fps)
@@ -324,7 +332,7 @@ def inspect_url(url, cookies_path=None):
             "acodec": acodec,
             "fps": fps or 0,
             "tbr": tbr or 0,
-            "needs_audio": (is_video and not is_audio and has_standalone_audio),
+            "needs_audio": (is_video and not has_sound and has_standalone_audio),
             "direct_url": f.get('url') or ''
         }
 
@@ -458,14 +466,6 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
     base_opts = {
         'no_warnings': True,
         'quiet': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios', 'web']
-            },
-            'instagram': {
-                'api': ['graphql', 'web']
-            }
-        },
         'http_headers': {
             'User-Agent': DEFAULT_USER_AGENT,
             'Accept-Language': 'en-US,en;q=0.9',
@@ -521,10 +521,14 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
                     for f in info.get('formats', []):
                         v_c = str(f.get('vcodec') or 'none').lower()
                         a_c = str(f.get('acodec') or 'none').lower()
+                        f_id = str(f.get('format_id'))
+                        f_note = str(f.get('format_note') or '').lower()
+                        is_dash_v = ('dash' in f_id.lower() and f_id.endswith('v')) or ('dash video' in f_note)
+
                         if v_c == 'none' and a_c != 'none':
                             has_standalone_audio = True
-                        if f.get('format_id') == format_id:
-                            if v_c != 'none' and a_c == 'none':
+                        if f_id == str(format_id):
+                            if (v_c != 'none' and a_c == 'none') or is_dash_v:
                                 is_video_only = True
         except Exception:
             pass
@@ -577,7 +581,11 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
 
         # Combined / Progressive format (preferred for Instagram, TikTok, Facebook, Twitter)
         c_opts = dict(base_opts)
-        c_opts['format'] = f"{format_id}/best[ext=mp4]/best" if format_id else 'best[ext=mp4]/best'
+        # If the requested format is video-only but has no audio stream to mux with, fallback to best progressive
+        if is_video_only and not has_standalone_audio:
+            c_opts['format'] = 'best[ext=mp4]/best'
+        else:
+            c_opts['format'] = f"{format_id}/best[ext=mp4]/best" if format_id else 'best[ext=mp4]/best'
         c_opts['outtmpl'] = output_path
         c_opts['progress_hooks'] = [make_hook("single")]
 

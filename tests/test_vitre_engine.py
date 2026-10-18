@@ -207,5 +207,68 @@ class VitreEngineTests(unittest.TestCase):
         best_1080 = candidates[('video', 1080)][1]
         self.assertEqual(candidates[('video', 1080)][2], 1080)
 
+    def test_instagram_progressive_format_priority(self):
+        # Simulated Instagram formats: format 0 (progressive mp4 with no codecs in dict) and dash video
+        raw_formats = [
+            {
+                "format_id": "dash-720v",
+                "ext": "mp4",
+                "width": 720,
+                "height": 1280,
+                "vcodec": "avc1.64001f",
+                "acodec": "none",
+                "format_note": "DASH video",
+                "tbr": 2000
+            },
+            {
+                "format_id": "0",
+                "ext": "mp4",
+                "width": None,
+                "height": None,
+                "vcodec": None,
+                "acodec": "none",
+                "format_note": None,
+                "tbr": 1800
+            }
+        ]
+        info = {"width": 720, "height": 1280}
+
+        has_standalone_audio = False # Instagram has no standalone audio streams
+        candidates = {}
+        for f in raw_formats:
+            fid = f.get('format_id')
+            ext = f.get('ext')
+            vcodec = str(f.get('vcodec') or 'none').lower()
+            acodec = str(f.get('acodec') or 'none').lower()
+            width = f.get('width') or 0
+            height = f.get('height') or 0
+            format_note = str(f.get('format_note') or '').lower()
+
+            is_dash_video = ('dash' in str(fid).lower() and str(fid).endswith('v')) or ('dash video' in format_note)
+            is_video = (vcodec != 'none') or (ext in ['mp4', 'm4v'] and not is_dash_video)
+
+            if is_video:
+                if not height:
+                    height = info.get('height') or 0
+                if not width:
+                    width = info.get('width') or 0
+
+            tier = min(width, height) if width < height else height
+            combo_key = ('video', tier)
+
+            has_sound = (is_video and not is_dash_video and (acodec != 'none' or not has_standalone_audio))
+            audio_bonus = 2000 if has_sound else 0
+            if is_dash_video and not has_standalone_audio:
+                audio_bonus = -5000
+
+            score = audio_bonus + (f.get('tbr') or 0)
+            if combo_key not in candidates or score > candidates[combo_key][0]:
+                candidates[combo_key] = (score, f)
+
+        # Format 0 (progressive with sound) MUST win over silent DASH video
+        winner = candidates[('video', 720)][1]
+        self.assertEqual(winner['format_id'], '0')
+
 if __name__ == '__main__':
     unittest.main()
+

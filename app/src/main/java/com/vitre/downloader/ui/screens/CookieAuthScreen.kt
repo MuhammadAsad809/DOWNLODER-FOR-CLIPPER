@@ -2,16 +2,21 @@ package com.vitre.downloader.ui.screens
 
 import android.net.Uri
 import android.webkit.CookieManager as AndroidCookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabColorSchemeParams
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +43,7 @@ import com.vitre.downloader.core.auth.CookieManager
 import com.vitre.downloader.ui.components.GlassButton
 import com.vitre.downloader.ui.components.GlassSurface
 import com.vitre.downloader.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -53,8 +60,11 @@ fun CookieAuthScreen(
     var importStatusMessage by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
 
-    // Active in-app web extractor target: Pair(title, url)
+    // State for Instagram/other WebView extraction
     var webExtractorTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    // State for YouTube Chrome Custom Tabs flow
+    var waitingForYouTubeCookies by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -73,6 +83,45 @@ fun CookieAuthScreen(
                     importStatusMessage = result.exceptionOrNull()?.message ?: "Failed to validate cookie file."
                 }
             }
+        }
+    }
+
+    // When user returns from Chrome Custom Tab (YouTube sign-in), extract cookies
+    // Chrome Custom Tabs share cookies with Android WebView's CookieManager
+    LaunchedEffect(waitingForYouTubeCookies) {
+        if (waitingForYouTubeCookies) {
+            // Wait a moment for the user to return from Chrome
+            delay(1500)
+            // Extract cookies from Chrome via Android CookieManager
+            val ytCookies = AndroidCookieManager.getInstance().getCookie("https://www.youtube.com/") ?: ""
+            val googleCookies = AndroidCookieManager.getInstance().getCookie("https://accounts.google.com/") ?: ""
+
+            // Merge both cookie sources
+            val allCookies = buildString {
+                if (ytCookies.isNotBlank()) append(ytCookies)
+                if (googleCookies.isNotBlank()) {
+                    if (isNotBlank()) append("; ")
+                    append(googleCookies)
+                }
+            }
+
+            if (allCookies.isNotBlank() && allCookies.contains("=")) {
+                val res = cookieManager.saveCookiesFromWeb("https://www.youtube.com/", allCookies)
+                if (res.isSuccess) {
+                    val count = res.getOrNull() ?: 0
+                    hasCookies = true
+                    activeDomains = cookieManager.getActiveDomains()
+                    isError = false
+                    importStatusMessage = "YouTube authentication successful! ($count cookies captured)"
+                } else {
+                    isError = true
+                    importStatusMessage = res.exceptionOrNull()?.message ?: "Failed to save YouTube cookies."
+                }
+            } else {
+                isError = false
+                importStatusMessage = "Sign in to YouTube in the browser that opened, then return here and tap again to capture cookies."
+            }
+            waitingForYouTubeCookies = false
         }
     }
 
@@ -139,37 +188,102 @@ fun CookieAuthScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Sign in directly inside Vitre to bypass YouTube bot blocks and access restricted Instagram reels. Cookies are automatically captured and saved client-side.",
+                    text = "Sign in to bypass YouTube bot blocks and access restricted Instagram reels. YouTube opens in Chrome (trusted by Google). Instagram opens in-app.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
-            // YouTube Extractor Button
+            // YouTube Extractor Button — Uses Chrome Custom Tabs (trusted by Google)
             item {
                 PlatformAuthCard(
                     title = "Sign In to YouTube / Google",
-                    subtitle = "Bypasses 'Sign in to confirm you're not a bot' blocks",
+                    subtitle = "Opens Chrome — trusted by Google (WebView is blocked)",
                     iconRes = R.drawable.ic_3d_youtube,
                     accentColor = Color(0xFFFF0033),
+                    badgeText = "Chrome",
                     onClick = {
-                        webExtractorTarget = Pair(
-                            "YouTube / Google Authentication",
-                            "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fm.youtube.com%2F"
-                        )
+                        // Launch Chrome Custom Tab for YouTube login
+                        try {
+                            val customTabsIntent = CustomTabsIntent.Builder()
+                                .setDefaultColorSchemeParams(
+                                    CustomTabColorSchemeParams.Builder()
+                                        .setToolbarColor(Color(0xFF0D1422).toArgb())
+                                        .setNavigationBarColor(Color(0xFF030508).toArgb())
+                                        .build()
+                                )
+                                .setShowTitle(true)
+                                .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
+                                .build()
+
+                            customTabsIntent.launchUrl(
+                                context,
+                                Uri.parse("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fm.youtube.com%2F")
+                            )
+                            waitingForYouTubeCookies = true
+                        } catch (e: Exception) {
+                            isError = true
+                            importStatusMessage = "Could not open Chrome browser. Make sure Chrome is installed."
+                        }
                     }
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // "Capture Cookies" button — appears after Chrome Custom Tab was opened
+                AnimatedVisibility(visible = !waitingForYouTubeCookies) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val ytCookies = AndroidCookieManager.getInstance().getCookie("https://www.youtube.com/") ?: ""
+                                val googleCookies = AndroidCookieManager.getInstance().getCookie("https://accounts.google.com/") ?: ""
+                                val allCookies = buildString {
+                                    if (ytCookies.isNotBlank()) append(ytCookies)
+                                    if (googleCookies.isNotBlank()) {
+                                        if (isNotBlank()) append("; ")
+                                        append(googleCookies)
+                                    }
+                                }
+
+                                if (allCookies.isNotBlank() && allCookies.contains("=")) {
+                                    val res = cookieManager.saveCookiesFromWeb("https://www.youtube.com/", allCookies)
+                                    if (res.isSuccess) {
+                                        val count = res.getOrNull() ?: 0
+                                        hasCookies = true
+                                        activeDomains = cookieManager.getActiveDomains()
+                                        isError = false
+                                        importStatusMessage = "YouTube authentication successful! ($count cookies captured)"
+                                    } else {
+                                        isError = true
+                                        importStatusMessage = res.exceptionOrNull()?.message ?: "Failed to save YouTube cookies."
+                                    }
+                                } else {
+                                    isError = false
+                                    importStatusMessage = "No YouTube cookies detected yet. Sign in via Chrome first, then tap this button."
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00D2FF)),
+                        border = BorderStroke(1.dp, Color(0xFF00D2FF).copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Capture YouTube Cookies", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Instagram Extractor Button
+            // Instagram Extractor Button — Uses in-app WebView (Instagram doesn't block WebViews)
             item {
                 PlatformAuthCard(
                     title = "Sign In to Instagram",
-                    subtitle = "Enables downloading private or restricted Instagram reels",
+                    subtitle = "Opens in-app browser — works for Instagram login",
                     iconRes = R.drawable.ic_3d_instagram,
                     accentColor = Color(0xFFE1306C),
+                    badgeText = "In-App",
                     onClick = {
                         webExtractorTarget = Pair(
                             "Instagram Authentication",
@@ -257,7 +371,7 @@ fun CookieAuthScreen(
             }
         }
 
-        // In-App Web Cookie Extractor Dialog Modal
+        // In-App Web Cookie Extractor Dialog Modal (for Instagram and other non-Google platforms)
         if (webExtractorTarget != null) {
             val (targetTitle, targetUrl) = webExtractorTarget!!
             InAppCookieExtractorModal(
@@ -292,6 +406,7 @@ private fun PlatformAuthCard(
     accentColor: Color,
     iconRes: Int? = null,
     iconVector: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    badgeText: String? = null,
     onClick: () -> Unit
 ) {
     Box(
@@ -343,11 +458,29 @@ private fun PlatformAuthCard(
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (badgeText != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = accentColor.copy(alpha = 0.15f),
+                            modifier = Modifier.padding(vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = accentColor,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
@@ -367,7 +500,8 @@ private fun PlatformAuthCard(
 }
 
 /**
- * Authentic In-App Browser Dialog with Live Cookie Detection and 1-Tap Netscape Export.
+ * In-App Browser Dialog for Instagram and non-Google platforms.
+ * Uses a mobile Instagram user-agent for better compatibility.
  */
 @Composable
 fun InAppCookieExtractorModal(
@@ -381,6 +515,17 @@ fun InAppCookieExtractorModal(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var detectedCookiesCount by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
+
+    // Determine if this is Instagram login to use appropriate user-agent
+    val isInstagram = remember { initialUrl.contains("instagram.com") }
+    val userAgent = remember {
+        if (isInstagram) {
+            // Mobile Instagram user-agent — Instagram accepts mobile WebView
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro Build/AP3A.241005.015) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36"
+        } else {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -439,8 +584,23 @@ fun InAppCookieExtractorModal(
 
                             Button(
                                 onClick = {
-                                    val cookieHeader = AndroidCookieManager.getInstance().getCookie(currentUrl) ?: ""
-                                    onCookiesExtracted(currentUrl, cookieHeader)
+                                    // For Instagram, read cookies from ALL relevant domains
+                                    val primaryCookies = AndroidCookieManager.getInstance().getCookie(currentUrl) ?: ""
+                                    val igCookies = if (isInstagram) {
+                                        val ig1 = AndroidCookieManager.getInstance().getCookie("https://www.instagram.com/") ?: ""
+                                        val ig2 = AndroidCookieManager.getInstance().getCookie("https://i.instagram.com/") ?: ""
+                                        buildString {
+                                            append(primaryCookies)
+                                            if (ig1.isNotBlank() && ig1 != primaryCookies) {
+                                                append("; "); append(ig1)
+                                            }
+                                            if (ig2.isNotBlank()) {
+                                                append("; "); append(ig2)
+                                            }
+                                        }
+                                    } else primaryCookies
+
+                                    onCookiesExtracted(currentUrl, igCookies)
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(0xFF00D2FF),
@@ -479,13 +639,22 @@ fun InAppCookieExtractorModal(
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
                                 databaseEnabled = true
-                                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                                userAgentString = userAgent
                                 loadWithOverviewMode = true
                                 useWideViewPort = true
+                                // Allow mixed content for Instagram API calls
+                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                // Cache mode for faster reloads
+                                cacheMode = WebSettings.LOAD_DEFAULT
+                                setSupportZoom(true)
+                                builtInZoomControls = true
+                                displayZoomControls = false
                             }
                             val cookieMgr = AndroidCookieManager.getInstance()
                             cookieMgr.setAcceptCookie(true)
                             cookieMgr.setAcceptThirdPartyCookies(this, true)
+
+                            webChromeClient = WebChromeClient()
 
                             webViewClient = object : WebViewClient() {
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
@@ -502,10 +671,24 @@ fun InAppCookieExtractorModal(
                                         val titleText = view?.title ?: pageTitle
                                         if (titleText.isNotBlank()) pageTitle = titleText
 
+                                        // Count cookies across all relevant domains
                                         val header = cookieMgr.getCookie(it) ?: ""
                                         val count = if (header.isBlank()) 0 else header.split(";").count { c -> c.trim().contains("=") }
                                         detectedCookiesCount = count
                                     }
+                                }
+
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    // Keep Instagram navigation within the WebView
+                                    val requestUrl = request?.url?.toString() ?: return false
+                                    if (requestUrl.contains("instagram.com") ||
+                                        requestUrl.contains("facebook.com") ||
+                                        requestUrl.contains("tiktok.com") ||
+                                        requestUrl.contains("twitter.com") ||
+                                        requestUrl.contains("x.com")) {
+                                        return false // Stay in WebView
+                                    }
+                                    return false
                                 }
                             }
                             loadUrl(initialUrl)
