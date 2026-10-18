@@ -161,7 +161,16 @@ class FFmpegEngine {
                 return@withContext Result.failure(Exception("No video track found in video stream"))
             }
 
-            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val videoMime = videoFormat.getString(MediaFormat.KEY_MIME) ?: ""
+            val isVpVideo = videoMime.contains("vp8") || videoMime.contains("vp9")
+
+            val outputContainer = if (isVpVideo) {
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+            } else {
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            }
+
+            muxer = MediaMuxer(outputPath, outputContainer)
 
             videoExtractor.selectTrack(videoTrackIndex)
             val muxerVideoTrack = muxer.addTrack(videoFormat)
@@ -173,15 +182,17 @@ class FFmpegEngine {
 
             muxer.start()
 
-            val videoBufSize = if (videoFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            val rawVideoBufSize = if (videoFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
                 videoFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-            } else 1024 * 1024
+            } else 4 * 1024 * 1024
+            val videoBufSize = maxOf(rawVideoBufSize, 4 * 1024 * 1024)
             val videoBuffer = ByteBuffer.allocate(videoBufSize)
             val videoBufferInfo = MediaCodec.BufferInfo()
 
-            val audioBufSize = if (audioFormat?.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) == true) {
+            val rawAudioBufSize = if (audioFormat?.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) == true) {
                 audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-            } else 256 * 1024
+            } else 512 * 1024
+            val audioBufSize = maxOf(rawAudioBufSize, 512 * 1024)
             val audioBuffer = ByteBuffer.allocate(audioBufSize)
             val audioBufferInfo = MediaCodec.BufferInfo()
 
@@ -340,7 +351,7 @@ class FFmpegEngine {
                     val isKey = (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
 
                     if (isVideo && !firstVideoKeyframeSeen) {
-                        if (isKey || sampleTimeUs >= startUs) {
+                        if (isKey) {
                             firstVideoKeyframeSeen = true
                             videoBaseUs = sampleTimeUs
                         } else {

@@ -174,15 +174,19 @@ class DownloadService : Service() {
             if (activeJobs.containsKey(id)) {
                 val now = System.currentTimeMillis()
                 val pct = progress.percentage
-                if (now - lastProgressTime >= 400L || Math.abs(pct - lastReportedPct) >= 0.02f || pct >= 0.99f) {
+                if (now - lastProgressTime >= 350L || Math.abs(pct - lastReportedPct) >= 0.015f || pct >= 0.99f) {
                     lastProgressTime = now
                     lastReportedPct = pct
-                    val progressText = "${progress.formattedSpeed} • ETA ${progress.formattedEta}"
+                    val speedText = if (progress.speed > 0) progress.formattedSpeed else ""
+                    val etaText = if (progress.eta > 0) "ETA ${progress.formattedEta}" else ""
+                    val metrics = listOf(speedText, etaText).filter { it.isNotEmpty() }.joinToString(" • ")
+                    val progressText = if (metrics.isNotEmpty()) metrics else "Downloading media..."
                     val notif = createNotification(id, title, progressText, (pct * 100).toInt(), false)
                     notificationManager.notify(notifId, notif)
 
+                    val statusMsg = if (metrics.isNotEmpty()) "Downloading ($metrics)" else "Downloading..."
                     serviceScope.launch {
-                        downloadDao.updateProgress(id, pct, DownloadStatus.DOWNLOADING.name)
+                        downloadDao.updateProgress(id, pct, statusMsg)
                     }
                 }
             }
@@ -206,6 +210,9 @@ class DownloadService : Service() {
         if (engineRes.needsMuxing && engineRes.videoPath != null && engineRes.audioPath != null) {
             val muxNotif = createNotification(id, title, "Synchronizing audio & video tracks...", 95, false)
             notificationManager.notify(notifId, muxNotif)
+            serviceScope.launch {
+                downloadDao.updateProgress(id, 0.95f, "Synchronizing audio & video tracks...")
+            }
 
             val muxResult = ffmpegEngine.muxVideoAndAudio(
                 videoPath = engineRes.videoPath,
@@ -226,26 +233,14 @@ class DownloadService : Service() {
             }
         }
 
-        // 3. Audio extraction if user requested audio-only mode and not already an audio file
+        // 3. Audio verification for audio-only downloads
         if (isAudioOnly) {
-            val audioTempFile = File(tempDir, "${id}_${safeTitle}.$audioFormat")
-            val extractResult = ffmpegEngine.extractAudio(
-                inputPath = finalFile.absolutePath,
-                outputPath = audioTempFile.absolutePath,
-                audioFormat = audioFormat
-            )
-            if (extractResult.isSuccess && audioTempFile.exists() && audioTempFile.length() > 1024) {
-                finalFile.delete()
-                finalFile = audioTempFile
-            } else {
-                // If extraction failed because input was already an audio stream, verify it
-                if (!finalFile.exists() || finalFile.length() < 1024) {
-                    val failNotif = createNotification(id, title, "Audio extraction failed", 0, false)
-                    notificationManager.notify(notifId, failNotif)
-                    downloadDao.updateStatus(id, DownloadStatus.FAILED.name)
-                    cleanupAndFinish(id, listOf(finalFile, audioTempFile))
-                    return
-                }
+            if (!finalFile.exists() || finalFile.length() < 512) {
+                val failNotif = createNotification(id, title, "Audio download produced an empty or corrupted file", 0, false)
+                notificationManager.notify(notifId, failNotif)
+                downloadDao.updateStatus(id, DownloadStatus.FAILED.name)
+                cleanupAndFinish(id, listOf(finalFile))
+                return
             }
         }
 
@@ -253,6 +248,9 @@ class DownloadService : Service() {
         if (clipStart != null && clipEnd != null && clipEnd > clipStart && !isAudioOnly) {
             val trimNotif = createNotification(id, title, "Clipping video segment...", 98, false)
             notificationManager.notify(notifId, trimNotif)
+            serviceScope.launch {
+                downloadDao.updateProgress(id, 0.98f, "Clipping video segment...")
+            }
 
             val clippedFile = File(tempDir, "${id}_${safeTitle}_clip_${clipStart}s_${clipEnd}s.mp4")
             val trimResult = ffmpegEngine.trimMedia(
@@ -274,28 +272,29 @@ class DownloadService : Service() {
         }
 
         // 5. Detect container type to ensure correct extension and MIME type
-        val isWebMFile = if (!isImage) isWebM(finalFile) else false
+        val isWebMFile = if (!isImage && !isAudioOnly) isWebM(finalFile) else false
         val (imageExt, imageMime) = if (isImage) detectImageExtension(finalFile, formatId, title) else Pair("jpg", "image/jpeg")
+        val (audioExt, audioMime) = if (isAudioOnly) detectAudioContainer(finalFile) else Pair(audioFormat, "audio/mpeg")
 
         val ext = when {
             isImage -> imageExt
-            isAudioOnly -> audioFormat
+            isAudioOnly -> audioExt
             isWebMFile -> "webm"
             else -> "mp4"
         }
         val mimeType = when {
             isImage -> imageMime
-            isAudioOnly -> when (audioFormat) {
-                "m4a", "aac" -> "audio/mp4"
-                "opus", "ogg" -> "audio/ogg"
-                else -> "audio/mpeg"
-            }
+            isAudioOnly -> audioMime
             isWebMFile -> "video/webm"
             else -> "video/mp4"
         }
 
         val clipSuffix = if (clipStart != null && clipEnd != null) "_clip" else ""
         val finalDisplayName = "$safeTitle$clipSuffix.$ext"
+
+        serviceScope.launch {
+            downloadDao.updateProgress(id, 0.99f, "Saving to storage...")
+        }
 
         val prefs = (application as VitreApplication).preferences
         val customUriStr = prefs.customDownloadUri.firstOrNull()
@@ -401,6 +400,50 @@ class DownloadService : Service() {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun detectAudioContainer(file: File): Pair<String, String> {
+        try {
+            if (file.exists() && file.length() >= 12) {
+                file.inputStream().use { stream ->
+                    val header = ByteArray(16)
+                    val read = stream.read(header)
+                    if (read >= 4) {
+                        // MP3 ID3 header: "ID3"
+                        if (header[0] == 'I'.code.toByte() && header[1] == 'D'.code.toByte() && header[2] == '3'.code.toByte()) {
+                            return Pair("mp3", "audio/mpeg")
+                        }
+                        // MP3 sync frame: 0xFF followed by 0xFB, 0xF3, or 0xF2
+                        if ((header[0].toInt() and 0xFF) == 0xFF && ((header[1].toInt() and 0xE0) == 0xE0)) {
+                            return Pair("mp3", "audio/mpeg")
+                        }
+                        // Ogg/Opus header: "OggS"
+                        if (header[0] == 'O'.code.toByte() && header[1] == 'g'.code.toByte() &&
+                            header[2] == 'g'.code.toByte() && header[3] == 'S'.code.toByte()) {
+                            return Pair("ogg", "audio/ogg")
+                        }
+                        // WebM header: 0x1A 0x45 0xDF 0xA3
+                        if (header[0] == 0x1A.toByte() && header[1] == 0x45.toByte() &&
+                            header[2] == 0xDF.toByte() && header[3] == 0xA3.toByte()) {
+                            return Pair("webm", "audio/webm")
+                        }
+                        // WAV header: "RIFF....WAVE"
+                        if (read >= 12 && header[0] == 'R'.code.toByte() && header[1] == 'I'.code.toByte() &&
+                            header[2] == 'F'.code.toByte() && header[3] == 'F'.code.toByte() &&
+                            header[8] == 'W'.code.toByte() && header[9] == 'A'.code.toByte() &&
+                            header[10] == 'V'.code.toByte() && header[11] == 'E'.code.toByte()) {
+                            return Pair("wav", "audio/wav")
+                        }
+                        // M4A / MP4 container: bytes 4-7 are "ftyp"
+                        if (read >= 8 && header[4] == 'f'.code.toByte() && header[5] == 't'.code.toByte() &&
+                            header[6] == 'y'.code.toByte() && header[7] == 'p'.code.toByte()) {
+                            return Pair("m4a", "audio/mp4")
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return Pair("m4a", "audio/mp4")
     }
 
     private fun cleanupAndFinish(id: Long, filesToDelete: List<File> = emptyList()) {

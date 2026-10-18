@@ -114,12 +114,15 @@ data class EngineDownloadResult(
                 fun onUpdate(statusJson: String) {
                     try {
                         val j = JSONObject(statusJson)
+                        val explicitPct = if (j.has("percentage")) j.optDouble("percentage", 0.0).toFloat() else null
                         val progress = DownloadProgress(
                             status = j.optString("status", "downloading"),
                             downloadedBytes = j.optLong("downloaded_bytes", 0),
                             totalBytes = j.optLong("total_bytes", 0),
                             speed = j.optDouble("speed", 0.0),
-                            eta = j.optLong("eta", 0)
+                            eta = j.optLong("eta", 0),
+                            progressFraction = explicitPct,
+                            phase = j.optString("phase", "single")
                         )
                         onProgress(progress)
                     } catch (_: Exception) { }

@@ -46,10 +46,16 @@ class MediaStoreManager(private val context: Context) {
                 val uri = resolver.insert(collection, values)
                     ?: return@withContext Result.failure(Exception("Failed to create MediaStore entry"))
 
+                var bytesWritten = 0L
                 resolver.openOutputStream(uri)?.use { out ->
                     FileInputStream(sourceFile).use { input ->
-                        input.copyTo(out)
+                        bytesWritten = input.copyTo(out)
                     }
+                }
+
+                if (bytesWritten != sourceFile.length() || bytesWritten == 0L) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                    return@withContext Result.failure(Exception("Failed to write complete media file to MediaStore ($bytesWritten / ${sourceFile.length()} bytes)"))
                 }
 
                 values.clear()
@@ -67,10 +73,16 @@ class MediaStoreManager(private val context: Context) {
                 val targetDir = File(baseDir, "Vitre").apply { mkdirs() }
                 val targetFile = File(targetDir, displayName)
 
+                var bytesWritten = 0L
                 FileInputStream(sourceFile).use { input ->
                     targetFile.outputStream().use { out ->
-                        input.copyTo(out)
+                        bytesWritten = input.copyTo(out)
                     }
+                }
+
+                if (bytesWritten != sourceFile.length() || bytesWritten == 0L) {
+                    try { targetFile.delete() } catch (_: Exception) {}
+                    return@withContext Result.failure(Exception("Failed to write complete media file to storage ($bytesWritten / ${sourceFile.length()} bytes)"))
                 }
 
                 // Trigger Media Scanner Broadcast
@@ -98,11 +110,17 @@ class MediaStoreManager(private val context: Context) {
             val targetFile = pickedDir.createFile(mimeType, displayName)
                 ?: return@withContext Result.failure(Exception("Failed to create file in custom folder"))
 
+            var bytesWritten = 0L
             context.contentResolver.openOutputStream(targetFile.uri)?.use { outStream ->
                 FileInputStream(sourceFile).use { inStream ->
-                    inStream.copyTo(outStream)
+                    bytesWritten = inStream.copyTo(outStream)
                 }
             } ?: return@withContext Result.failure(Exception("Failed to open output stream"))
+
+            if (bytesWritten != sourceFile.length() || bytesWritten == 0L) {
+                try { targetFile.delete() } catch (_: Exception) {}
+                return@withContext Result.failure(Exception("Failed to write complete media file to custom folder ($bytesWritten / ${sourceFile.length()} bytes)"))
+            }
 
             Result.success(targetFile.uri)
         } catch (e: Exception) {

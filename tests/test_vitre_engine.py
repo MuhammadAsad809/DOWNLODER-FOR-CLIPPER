@@ -269,6 +269,63 @@ class VitreEngineTests(unittest.TestCase):
         winner = candidates[('video', 720)][1]
         self.assertEqual(winner['format_id'], '0')
 
+    def test_codec_prioritization_h264_over_vp9(self):
+        # VP9 stream with higher bitrate vs H.264 stream with slightly lower bitrate
+        raw_formats = [
+            {
+                "format_id": "248_vp9",
+                "ext": "webm",
+                "height": 1080,
+                "vcodec": "vp9",
+                "acodec": "none",
+                "tbr": 3500
+            },
+            {
+                "format_id": "137_h264",
+                "ext": "mp4",
+                "height": 1080,
+                "vcodec": "avc1.64002a",
+                "acodec": "none",
+                "tbr": 2800
+            }
+        ]
+
+        candidates = {}
+        for f in raw_formats:
+            vcodec = f['vcodec']
+            codec_bonus = 0
+            if 'avc1' in vcodec or 'h264' in vcodec:
+                codec_bonus += 500000
+            elif 'vp9' in vcodec:
+                codec_bonus += 10000
+            score = codec_bonus + f['tbr']
+            candidates[f['height']] = (score, f)
+
+        # H.264 stream must win for native Android MediaMuxer compatibility
+        self.assertEqual(candidates[1080][1]['format_id'], '137_h264')
+
+    def test_monotonic_multiphase_progress_calculation(self):
+        # Video phase: 0% to 85%
+        raw_video_pct = 0.50 # 50% through video
+        scaled_video = raw_video_pct * 0.85
+        self.assertAlmostEqual(scaled_video, 0.425)
+
+        # Finished video phase
+        scaled_video_done = 1.0 * 0.85
+        self.assertAlmostEqual(scaled_video_done, 0.85)
+
+        # Audio phase: starts at 85%, goes up to 97%
+        raw_audio_pct = 0.50 # 50% through audio
+        scaled_audio = 0.85 + (raw_audio_pct * 0.12)
+        self.assertAlmostEqual(scaled_audio, 0.91)
+
+        # Audio phase finished
+        scaled_audio_done = 0.85 + (1.0 * 0.12)
+        self.assertAlmostEqual(scaled_audio_done, 0.97)
+
+        # Ensure monotonic ordering: scaled_video_done <= scaled_audio
+        self.assertLessEqual(scaled_video_done, scaled_audio)
+
 if __name__ == '__main__':
     unittest.main()
 

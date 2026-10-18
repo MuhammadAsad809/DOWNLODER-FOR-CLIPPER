@@ -87,6 +87,7 @@ fun DownloadsScreen(
                         onCancel = {
                             val cancelIntent = Intent(context, DownloadService::class.java).apply {
                                 action = DownloadService.ACTION_CANCEL
+                                putExtra(DownloadService.EXTRA_DOWNLOAD_ID, item.id)
                             }
                             context.startService(cancelIntent)
                         }
@@ -168,13 +169,48 @@ fun ActiveDownloadCard(
     item: DownloadEntity,
     onCancel: () -> Unit
 ) {
+    val animatedProgress by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = item.progress.coerceIn(0f, 1f),
+        animationSpec = androidx.compose.animation.core.tween(300),
+        label = "DownloadProgressAnimation"
+    )
+
     GlassSurface(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 18.dp,
         elevation = 4.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (item.thumbnail.isNotBlank()) {
+                    AsyncImage(
+                        model = item.thumbnail,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(CardSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (item.resolution.contains("audio", ignoreCase = true)) Icons.Default.MusicNote else Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = ElectricBlue,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = item.title,
@@ -183,23 +219,35 @@ fun ActiveDownloadCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = item.resolution,
                         style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
+                        color = ElectricBlue
                     )
                 }
 
-                IconButton(onClick = onCancel) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = ErrorRed)
+                IconButton(
+                    onClick = onCancel,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Cancel Download",
+                        tint = ErrorRed,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             LinearProgressIndicator(
-                progress = { item.progress },
-                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                progress = { animatedProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
                 color = ElectricBlue,
                 trackColor = CardSurface
             )
@@ -208,17 +256,20 @@ fun ActiveDownloadCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${(item.progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = "${(animatedProgress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                     color = ElectricBlue
                 )
                 Text(
                     text = item.status,
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

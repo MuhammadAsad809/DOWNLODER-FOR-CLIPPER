@@ -50,10 +50,25 @@ data class DownloadProgress(
     val downloadedBytes: Long,
     val totalBytes: Long,
     val speed: Double,
-    val eta: Long
+    val eta: Long,
+    val progressFraction: Float? = null,
+    val phase: String = "single"
 ) {
     val percentage: Float
-        get() = if (totalBytes > 0) (downloadedBytes.toFloat() / totalBytes.toFloat()) else 0f
+        get() = progressFraction ?: if (totalBytes > 0) (downloadedBytes.toFloat() / totalBytes.toFloat()) else 0f
+
+    val formattedDownloaded: String
+        get() {
+            val mb = downloadedBytes / (1024.0 * 1024.0)
+            return if (mb >= 1024) String.format("%.2f GB", mb / 1024.0) else String.format("%.1f MB", mb)
+        }
+
+    val formattedTotal: String
+        get() {
+            if (totalBytes <= 0) return "--"
+            val mb = totalBytes / (1024.0 * 1024.0)
+            return if (mb >= 1024) String.format("%.2f GB", mb / 1024.0) else String.format("%.1f MB", mb)
+        }
 
     val formattedSpeed: String
         get() = if (speed > 0) {

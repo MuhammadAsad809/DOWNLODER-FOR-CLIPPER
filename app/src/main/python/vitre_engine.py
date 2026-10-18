@@ -119,10 +119,13 @@ def download_stream_chunked(direct_url, output_path, callback=None):
                     elapsed = max(time.time() - start_time, 0.001)
                     speed = downloaded / elapsed
                     eta = (total_size - downloaded) / speed if speed > 0 and total_size > 0 else 0
+                    pct = (downloaded / total_size) if total_size > 0 else 0.0
                     callback(json.dumps({
                         "status": "downloading",
+                        "phase": "single",
                         "downloaded_bytes": downloaded,
                         "total_bytes": total_size,
+                        "percentage": min(1.0, max(0.0, pct)),
                         "speed": speed,
                         "eta": int(eta)
                     }))
@@ -310,14 +313,24 @@ def inspect_url(url, cookies_path=None):
 
         # Progressive videos with audio (e.g. Instagram format 0, standard mp4) or formats with audio track
         has_sound = (is_video and not is_dash_video and (acodec != 'none' or not has_standalone_audio)) or is_audio
-        audio_bonus = 2000 if has_sound else 0
+        audio_bonus = 2000000 if has_sound else 0
         # Heavily penalize silent DASH video streams if there are no standalone audio streams to mux with
         if is_dash_video and not has_standalone_audio:
-            audio_bonus = -5000
+            audio_bonus = -5000000
 
-        codec_bonus = 50 if ('avc1' in vcodec or 'h264' in vcodec or 'mp4a' in acodec or 'aac' in acodec) else 0
+        # Heavily prioritize H.264/AVC video and AAC audio for guaranteed Android MediaMuxer hardware compatibility
+        codec_bonus = 0
+        if 'avc1' in vcodec or 'h264' in vcodec:
+            codec_bonus += 500000
+        elif 'hev1' in vcodec or 'hvc1' in vcodec:
+            codec_bonus += 100000
+        elif 'vp9' in vcodec or 'vp09' in vcodec:
+            codec_bonus += 10000
+        if 'mp4a' in acodec or 'aac' in acodec:
+            codec_bonus += 500000
+
         total_bitrate = tbr or (vbr + abr)
-        quality_score = (audio_bonus + total_bitrate + codec_bonus, filesize, fps)
+        quality_score = (audio_bonus + codec_bonus + total_bitrate, filesize, fps)
 
         candidate_data = {
             "format_id": fid,
@@ -446,17 +459,29 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         except Exception:
             pass # Fallback to standard yt-dlp if direct stream fails
 
-    # 3. Progress hook with cooperative cancellation
-    def make_hook(phase="video"):
+    # 3. Progress hook with cooperative cancellation and monotonic multi-phase scaling
+    def make_hook(phase="single"):
         def hook(d):
             if check_cancellation(output_path):
                 raise InterruptedError("Download cancelled by user")
             if callback:
+                dl = d.get("downloaded_bytes", 0)
+                tot = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
+                raw_pct = (dl / tot) if (tot and tot > 0) else 0.0
+
+                if phase == "dash_video":
+                    pct = raw_pct * 0.85
+                elif phase == "dash_audio":
+                    pct = 0.85 + (raw_pct * 0.12)
+                else:
+                    pct = raw_pct
+
                 status = {
                     "status": d.get("status", "downloading"),
                     "phase": phase,
-                    "downloaded_bytes": d.get("downloaded_bytes", 0),
-                    "total_bytes": d.get("total_bytes") or d.get("total_bytes_estimate", 0),
+                    "downloaded_bytes": dl,
+                    "total_bytes": tot,
+                    "percentage": min(1.0, max(0.0, pct)),
                     "speed": d.get("speed", 0),
                     "eta": d.get("eta", 0)
                 }
@@ -539,9 +564,9 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
             audio_tmp = f"{output_path}.audio.tmp"
 
             v_opts = dict(base_opts)
-            v_opts['format'] = f"{format_id}/bestvideo/best"
+            v_opts['format'] = f"{format_id}/bestvideo[ext=mp4]/bestvideo/best"
             v_opts['outtmpl'] = video_tmp
-            v_opts['progress_hooks'] = [make_hook("video")]
+            v_opts['progress_hooks'] = [make_hook("dash_video")]
 
             with yt_dlp.YoutubeDL(v_opts) as ydl:
                 ydl.download([canonical_url])
@@ -550,7 +575,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
             a_opts = dict(base_opts)
             a_opts['format'] = 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
             a_opts['outtmpl'] = audio_tmp
-            a_opts['progress_hooks'] = [make_hook("audio")]
+            a_opts['progress_hooks'] = [make_hook("dash_audio")]
 
             audio_download_ok = False
             try:
