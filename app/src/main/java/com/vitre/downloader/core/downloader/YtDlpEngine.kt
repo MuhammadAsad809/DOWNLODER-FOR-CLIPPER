@@ -7,6 +7,7 @@ import com.vitre.downloader.core.models.FormatOption
 import com.vitre.downloader.core.models.MediaInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.CancellationException
 import org.json.JSONObject
 
 class YtDlpEngine {
@@ -102,6 +103,8 @@ data class EngineDownloadResult(
         cookiesPath: String? = null,
         clipStart: Long? = null,
         clipEnd: Long? = null,
+        isAudioOnly: Boolean = false,
+        audioFormat: String = "mp3",
         onProgress: (DownloadProgress) -> Unit
     ): Result<EngineDownloadResult> = withContext(Dispatchers.IO) {
         try {
@@ -134,12 +137,20 @@ data class EngineDownloadResult(
                 cookiesPath,
                 pyCallback,
                 clipStart,
-                clipEnd
+                clipEnd,
+                isAudioOnly,
+                audioFormat
             ).toString()
 
             val json = JSONObject(pyResult)
             if (json.has("error")) {
-                Result.failure(Exception(json.getString("error")))
+                val errMsg = json.getString("error")
+                val isCancelled = json.optBoolean("cancelled", false) || errMsg.contains("cancelled", ignoreCase = true)
+                if (isCancelled) {
+                    Result.failure(CancellationException(errMsg))
+                } else {
+                    Result.failure(Exception(errMsg))
+                }
             } else {
                 val needsMuxing = json.optBoolean("needs_muxing", false)
                 val videoPath = if (json.has("video_path")) json.getString("video_path") else null

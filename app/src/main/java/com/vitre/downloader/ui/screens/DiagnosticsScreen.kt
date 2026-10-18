@@ -70,7 +70,7 @@ fun DiagnosticsScreen(
                         DiagnosticRow(label = "Android OS", value = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                         DiagnosticRow(label = "Device Architecture", value = Build.SUPPORTED_ABIS.joinToString(", "))
                         DiagnosticRow(label = "yt-dlp Engine", value = ytdlpVer)
-                        DiagnosticRow(label = "FFmpeg Native", value = ffmpegVer)
+                        DiagnosticRow(label = "Media Processing Stack", value = ffmpegVer)
                         DiagnosticRow(label = "Python Runtime", value = pythonVer.lines().firstOrNull() ?: pythonVer)
                     }
                 }
@@ -92,7 +92,7 @@ fun DiagnosticsScreen(
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "• Zero remote servers: All media inspection and downloading occurs directly between your device and target servers.\n• Local SQLite storage: History and download records are saved only in the device sandbox.\n• Sanitized diagnostics: No URLs, credentials, or cookies are stored or exposed in diagnostic outputs.",
+                            text = "• Zero remote proxy servers: Media downloads occur directly between your device and target servers; if anti-bot walls block TikTok, fallback metadata resolves the direct CDN URL.\n• Local SQLite storage: History and download records are saved only in the device sandbox.\n• Sanitized diagnostics: No URLs, credentials, or cookies are stored or exposed in diagnostic outputs.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary,
                             lineHeight = MaterialTheme.typography.bodySmall.lineHeight

@@ -123,6 +123,8 @@ fun HomeScreen(
     recentDownloads: List<DownloadEntity>,
     errorMessage: String?,
     onClearError: () -> Unit,
+    defaultQuality: String = "best",
+    defaultAudioFormat: String = "mp3",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -458,7 +460,9 @@ fun HomeScreen(
                 IosSpringyMediaInspectionModal(
                     mediaInfo = mediaInfo,
                     onDismiss = onDismissInspection,
-                    onConfirm = onStartDownload
+                    onConfirm = onStartDownload,
+                    defaultQuality = defaultQuality,
+                    defaultAudioFormat = defaultAudioFormat
                 )
             }
         }
@@ -1107,7 +1111,9 @@ fun LiquidGlassDownloadButton(
 fun IosSpringyMediaInspectionModal(
     mediaInfo: MediaInfo,
     onDismiss: () -> Unit,
-    onConfirm: (MediaInfo, FormatOption, Boolean, String, Long?, Long?) -> Unit
+    onConfirm: (MediaInfo, FormatOption, Boolean, String, Long?, Long?) -> Unit,
+    defaultQuality: String = "best",
+    defaultAudioFormat: String = "mp3"
 ) {
     var isAudioOnly by remember { mutableStateOf(false) }
 
@@ -1118,13 +1124,17 @@ fun IosSpringyMediaInspectionModal(
     val audioFormats = remember(mediaInfo) { mediaInfo.formats.filter { it.isAudio && !it.isVideo } }
     val imageFormats = remember(mediaInfo) { mediaInfo.formats.filter { it.isImage } }
 
-    var selectedFormat by remember {
+    var selectedAudioFormat by remember(defaultAudioFormat) { mutableStateOf(defaultAudioFormat) }
+
+    var selectedFormat by remember(mediaInfo, defaultQuality) {
+        val preferred = if (defaultQuality != "best") {
+            videoFormats.firstOrNull { it.resolution.contains(defaultQuality, ignoreCase = true) }
+        } else null
         mutableStateOf(
             if (isImageOnly) (imageFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
-            else (videoFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
+            else (preferred ?: videoFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
         )
     }
-    var selectedAudioFormat by remember { mutableStateOf("mp3") }
 
     // Clipper state
     var enableClipping by remember { mutableStateOf(false) }
@@ -1717,7 +1727,19 @@ fun IosSpringyMediaInspectionModal(
                             RoundedCornerShape(16.dp)
                         )
                         .clickable(enabled = canDownload) {
-                            val fmt = selectedFormat ?: mediaInfo.formats.first()
+                            val fmt = if (isAudioOnly) {
+                                audioFormats.firstOrNull { it.ext.equals(selectedAudioFormat, ignoreCase = true) }
+                                    ?: audioFormats.firstOrNull()
+                                    ?: FormatOption(
+                                        formatId = "bestaudio",
+                                        ext = selectedAudioFormat,
+                                        resolution = "Audio (${selectedAudioFormat.uppercase()})",
+                                        isAudio = true,
+                                        isVideo = false
+                                    )
+                            } else {
+                                selectedFormat ?: mediaInfo.formats.first()
+                            }
                             onConfirm(mediaInfo, fmt, isAudioOnly, selectedAudioFormat, parsedStart, parsedEnd)
                         },
                     contentAlignment = Alignment.Center

@@ -55,14 +55,30 @@ class FFmpegEngine {
 
             extractor.selectTrack(audioTrackIndex)
 
-            // Mux into MP4 container for audio (.m4a)
-            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // Select container format based on audio codec
+            val mime = audioFormatObj.getString(MediaFormat.KEY_MIME) ?: ""
+            val outputContainer = when {
+                mime.contains("opus") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                    MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG
+                }
+                else -> {
+                    MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+                }
+            }
+
+            muxer = MediaMuxer(outputPath, outputContainer)
             val muxerAudioTrack = muxer.addTrack(audioFormatObj)
             muxer.start()
 
-            val maxBufferSize = audioFormatObj.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 256 * 1024)
+            // API 26-28 compatible buffer size retrieval (Finding 6 fix)
+            val maxBufferSize = if (audioFormatObj.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                audioFormatObj.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+            } else {
+                256 * 1024
+            }
             val buffer = ByteBuffer.allocate(maxBufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
+            var samplesWritten = 0
 
             while (true) {
                 bufferInfo.offset = 0
@@ -73,12 +89,20 @@ class FFmpegEngine {
                 bufferInfo.presentationTimeUs = extractor.sampleTime
                 bufferInfo.flags = extractor.sampleFlags
                 muxer.writeSampleData(muxerAudioTrack, buffer, bufferInfo)
+                samplesWritten++
                 extractor.advance()
             }
 
             muxer.stop()
+
+            if (samplesWritten == 0 || !outputFile.exists() || outputFile.length() < 1024) {
+                outputFile.delete()
+                return@withContext Result.failure(Exception("Audio extraction produced 0 samples or corrupted output"))
+            }
+
             Result.success(outputPath)
         } catch (e: Exception) {
+            outputFile.delete()
             Result.failure(e)
         } finally {
             try { extractor?.release() } catch (_: Exception) {}
@@ -185,8 +209,15 @@ class FFmpegEngine {
             }
 
             muxer.stop()
+
+            if (!outputFile.exists() || outputFile.length() < 1024) {
+                outputFile.delete()
+                return@withContext Result.failure(Exception("Muxing video and audio tracks produced an empty or corrupted file"))
+            }
+
             Result.success(outputPath)
         } catch (e: Exception) {
+            outputFile.delete()
             Result.failure(e)
         } finally {
             try { videoExtractor?.release() } catch (_: Exception) {}
@@ -305,8 +336,15 @@ class FFmpegEngine {
             }
 
             muxer.stop()
+
+            if (!outputFile.exists() || outputFile.length() < 1024) {
+                outputFile.delete()
+                return@withContext Result.failure(Exception("Clipping video segment produced an empty or corrupted file"))
+            }
+
             Result.success(outputPath)
         } catch (e: Exception) {
+            outputFile.delete()
             Result.failure(e)
         } finally {
             try { extractor?.release() } catch (_: Exception) {}

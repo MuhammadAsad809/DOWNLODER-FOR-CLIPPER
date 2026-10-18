@@ -1,6 +1,6 @@
 # Vitre Downloader (Pure Native Android)
 
-**Vitre Downloader** is a modern, local-first Android media downloader built 100% natively with **Kotlin** and **Jetpack Compose**. It features an OLED-optimized **Liquid Glass** aesthetic (leveraging Android 13+ AGSL GPU shaders with a graceful Material 3 fallback on earlier devices), on-device media inspection and downloading via **yt-dlp**, audio extraction via **FFmpeg**, and zero dependence on external app servers or third-party backends.
+**Vitre Downloader** is a modern, local-first Android media downloader built 100% natively with **Kotlin** and **Jetpack Compose**. It features an OLED-optimized **Liquid Glass** aesthetic (leveraging Android 13+ AGSL GPU shaders with a graceful Material 3 fallback on earlier devices), on-device media inspection and downloading via **yt-dlp**, hardware-accelerated stream multiplexing, trimming, and audio extraction via Android's native **MediaCodec** and **MediaMuxer**, and zero dependence on external app servers or third-party backends.
 
 ---
 
@@ -13,7 +13,7 @@
 | **UI Framework** | Jetpack Compose + Material Design 3 |
 | **Liquid Glass UI** | AGSL GPU RuntimeShader (API 33+) with Material 3 frosted glass fallback |
 | **Downloader Engine** | `yt-dlp` embedded natively via Chaquopy Python 3.11 runtime |
-| **Media Processing** | Native Android Mobile-FFmpeg 4.4-LTS & FFprobe |
+| **Media Processing** | Android Hardware-Accelerated MediaCodec, MediaExtractor & MediaMuxer |
 | **Storage & File Access** | Android MediaStore (`IS_PENDING` on API 29+) & Storage Access Framework (SAF) |
 | **Local Database** | Room (SQLite) for downloads library and inspection history |
 | **Preferences** | Jetpack DataStore |
@@ -34,7 +34,8 @@
    - **Never displays fabricated or non-existent formats**.
 
 3. **In-APK Execution**:
-   - The Python runtime (`yt-dlp`) and native FFmpeg libraries are bundled directly inside the APK.
+   - The Python runtime (`yt-dlp`) is bundled directly inside the APK via Chaquopy.
+   - Stream synchronization, audio extraction, and trimming are executed on-device using Android's native MediaCodec hardware pipeline.
    - Operates in-process via JNI, avoiding Android 10+ `W^X` memory violations.
 
 4. **Liquid Glass Design System**:

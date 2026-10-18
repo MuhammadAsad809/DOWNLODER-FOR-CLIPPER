@@ -38,10 +38,27 @@ def resolve_url(url):
             return clean
     return clean
 
+def check_cancellation(output_path):
+    """Check if cancellation signal file exists."""
+    candidates = [f"{output_path}.cancel"]
+    if output_path.endswith('.video.tmp') or output_path.endswith('.audio.tmp'):
+        base = output_path.rsplit('.', 2)[0] + '.tmp'
+        candidates.append(f"{base}.cancel")
+        candidates.append(f"{output_path.rsplit('.', 2)[0]}.cancel")
+
+    for c in candidates:
+        if os.path.exists(c):
+            try:
+                os.remove(c)
+            except Exception:
+                pass
+            return True
+    return False
+
 def extract_tiktok_fallback(url):
     """
-    Fallback extractor for TikTok when yt-dlp faces anti-bot blocks or proprietary ByteVC1 codecs.
-    Returns clean watermark-free H.264 MP4 with synchronized AAC audio.
+    Fallback extractor using TikWM API when direct yt-dlp extraction encounters anti-bot
+    blocks or login walls.
     """
     try:
         api_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}"
@@ -51,6 +68,8 @@ def extract_tiktok_fallback(url):
             if data.get('code') == 0 and data.get('data'):
                 d = data['data']
                 play_url = d.get('play')
+                height = d.get('height') or 0
+                res_label = f"{height}p (Watermark-Free)" if height > 0 else "HD (Watermark-Free)"
                 return {
                     "title": d.get('title') or "TikTok Video",
                     "thumbnail": d.get('cover') or d.get('origin_cover') or "",
@@ -63,14 +82,14 @@ def extract_tiktok_fallback(url):
                         {
                             "format_id": "hd_no_watermark",
                             "ext": "mp4",
-                            "resolution": "HD (No Watermark)",
-                            "height": 1080,
+                            "resolution": res_label,
+                            "height": height,
                             "filesize": d.get('size', 0),
                             "is_video": True,
                             "is_audio": True,
                             "vcodec": "h264",
                             "acodec": "aac",
-                            "fps": 30.0,
+                            "fps": 0.0,
                             "tbr": 0.0,
                             "needs_audio": False
                         }
@@ -81,7 +100,7 @@ def extract_tiktok_fallback(url):
     return None
 
 def download_stream_chunked(direct_url, output_path, callback=None):
-    """Download direct media URL chunk-by-chunk while firing progress callbacks."""
+    """Download direct media URL chunk-by-chunk with cooperative cancellation check."""
     req = urllib.request.Request(direct_url, headers={'User-Agent': DEFAULT_USER_AGENT})
     with urllib.request.urlopen(req, timeout=45) as resp:
         total_size = int(resp.headers.get('content-length', 0))
@@ -89,6 +108,8 @@ def download_stream_chunked(direct_url, output_path, callback=None):
         start_time = time.time()
         with open(output_path, 'wb') as f:
             while True:
+                if check_cancellation(output_path):
+                    raise InterruptedError("Download cancelled by user")
                 chunk = resp.read(64 * 1024)
                 if not chunk:
                     break
@@ -216,7 +237,7 @@ def inspect_url(url, cookies_path=None):
 
     formats = []
     raw_formats = info.get('formats', [])
-    seen_combos = set()
+    candidates = {}
 
     for f in raw_formats:
         fid = f.get('format_id')
@@ -224,9 +245,11 @@ def inspect_url(url, cookies_path=None):
         vcodec = str(f.get('vcodec') or 'none').lower()
         acodec = str(f.get('acodec') or 'none').lower()
         height = f.get('height')
-        filesize = f.get('filesize') or f.get('filesize_approx')
-        fps = f.get('fps')
-        tbr = f.get('tbr')
+        filesize = f.get('filesize') or f.get('filesize_approx') or 0
+        fps = f.get('fps') or 0
+        tbr = f.get('tbr') or 0
+        vbr = f.get('vbr') or 0
+        abr = f.get('abr') or 0
 
         is_video = vcodec != 'none'
         is_audio = acodec != 'none'
@@ -249,11 +272,13 @@ def inspect_url(url, cookies_path=None):
             resolution_label = ext
 
         combo_key = (resolution_label, ext, is_video, is_audio, is_image)
-        if combo_key in seen_combos:
-            continue
-        seen_combos.add(combo_key)
 
-        formats.append({
+        # Quality scoring to keep highest quality variant for each tier
+        total_bitrate = tbr or (vbr + abr)
+        codec_bonus = 50 if ('avc1' in vcodec or 'h264' in vcodec or 'mp4a' in acodec or 'aac' in acodec) else 0
+        quality_score = (total_bitrate + codec_bonus, filesize, fps)
+
+        candidate_data = {
             "format_id": fid,
             "ext": ext,
             "resolution": resolution_label,
@@ -268,7 +293,12 @@ def inspect_url(url, cookies_path=None):
             "tbr": tbr or 0,
             "needs_audio": (is_video and not is_audio),
             "direct_url": f.get('url') or ''
-        })
+        }
+
+        if combo_key not in candidates or quality_score > candidates[combo_key][0]:
+            candidates[combo_key] = (quality_score, candidate_data)
+
+    formats = [item[1] for item in candidates.values()]
 
     # Fallback for direct image posts (Pinterest, Unsplash, Instagram photos)
     if not formats and (info.get('url') or info.get('thumbnail')):
@@ -322,12 +352,12 @@ def inspect_url(url, cookies_path=None):
     }
     return json.dumps(result)
 
-def download_media(url, format_id, output_path, cookies_path=None, callback=None, clip_start=None, clip_end=None):
+def download_media(url, format_id, output_path, cookies_path=None, callback=None, clip_start=None, clip_end=None, is_audio_only=False, audio_format='mp3'):
     """
     Download media to output_path.
     If the requested format is video-only, downloads video and audio separately
     and signals needs_muxing=True so native MediaMuxer combines them with sound.
-    Supports time clipping via clip_start and clip_end.
+    Supports direct audio-only stream extraction and time clipping.
     """
     if not yt_dlp:
         return json.dumps({"error": "yt-dlp is not available"})
@@ -361,8 +391,8 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
                 "output_path": output_path
             })
 
-    # 2. Handle TikTok Fallback downloads
-    if format_id == 'hd_no_watermark' or is_tiktok:
+    # 2. Handle TikTok Fallback downloads only if explicitly requested
+    if format_id == 'hd_no_watermark':
         try:
             tiktok_meta = extract_tiktok_fallback(canonical_url)
             if tiktok_meta and tiktok_meta.get('direct_url'):
@@ -375,9 +405,11 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         except Exception:
             pass # Fallback to standard yt-dlp if direct stream fails
 
-    # 3. Inspect format to check if video-only
+    # 3. Progress hook with cooperative cancellation
     def make_hook(phase="video"):
         def hook(d):
+            if check_cancellation(output_path):
+                raise InterruptedError("Download cancelled by user")
             if callback:
                 status = {
                     "status": d.get("status", "downloading"),
@@ -421,25 +453,47 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         except Exception:
             pass
 
-    # Check format characteristics with robust string conversion
-    is_video_only = False
     try:
-        inspect_opts = dict(base_opts)
-        inspect_opts['skip_download'] = True
-        with yt_dlp.YoutubeDL(inspect_opts) as ydl:
-            info = ydl.extract_info(canonical_url, download=False)
-            if info:
-                for f in info.get('formats', []):
-                    if f.get('format_id') == format_id:
-                        vcodec = str(f.get('vcodec') or 'none').lower()
-                        acodec = str(f.get('acodec') or 'none').lower()
-                        if vcodec != 'none' and acodec == 'none':
-                            is_video_only = True
-                        break
-    except Exception:
-        pass
+        # 4. Direct Audio-Only download branch
+        if is_audio_only:
+            a_opts = dict(base_opts)
+            if audio_format in ['m4a', 'aac']:
+                a_opts['format'] = f"{format_id}/140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best" if format_id and format_id not in ['best', 'audio_only', 'bestaudio'] else '140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
+            elif audio_format in ['opus', 'ogg', 'webm']:
+                a_opts['format'] = f"{format_id}/bestaudio[ext=opus]/bestaudio[ext=webm]/bestaudio/best" if format_id and format_id not in ['best', 'audio_only', 'bestaudio'] else 'bestaudio[ext=opus]/bestaudio[ext=webm]/bestaudio/best'
+            else:
+                a_opts['format'] = f"{format_id}/bestaudio/best" if format_id and format_id not in ['best', 'audio_only', 'bestaudio'] else 'bestaudio/best'
 
-    try:
+            a_opts['outtmpl'] = output_path
+            a_opts['progress_hooks'] = [make_hook("audio")]
+
+            with yt_dlp.YoutubeDL(a_opts) as ydl:
+                ydl.download([canonical_url])
+
+            return json.dumps({
+                "success": True,
+                "needs_muxing": False,
+                "output_path": output_path
+            })
+
+        # Check format characteristics with robust string conversion
+        is_video_only = False
+        try:
+            inspect_opts = dict(base_opts)
+            inspect_opts['skip_download'] = True
+            with yt_dlp.YoutubeDL(inspect_opts) as ydl:
+                info = ydl.extract_info(canonical_url, download=False)
+                if info:
+                    for f in info.get('formats', []):
+                        if f.get('format_id') == format_id:
+                            vcodec = str(f.get('vcodec') or 'none').lower()
+                            acodec = str(f.get('acodec') or 'none').lower()
+                            if vcodec != 'none' and acodec == 'none':
+                                is_video_only = True
+                            break
+        except Exception:
+            pass
+
         if is_video_only:
             # Video stream
             video_tmp = f"{output_path}.video.tmp"
@@ -470,7 +524,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
                 "output_path": output_path
             })
         else:
-            # Combined / Progressive / Audio-Only format
+            # Combined / Progressive format
             c_opts = dict(base_opts)
             c_opts['format'] = f"{format_id}/best" if format_id else 'best'
             c_opts['outtmpl'] = output_path
@@ -495,6 +549,8 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
             })
 
     except Exception as e:
+        if isinstance(e, InterruptedError) or "cancelled" in str(e).lower():
+            return json.dumps({"error": "Download cancelled by user", "cancelled": True})
         # Final safety net for TikTok: if standard download failed, attempt fallback
         if is_tiktok:
             try:
