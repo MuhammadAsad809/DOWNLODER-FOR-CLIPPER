@@ -22,6 +22,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import android.net.Uri
 import kotlinx.coroutines.flow.firstOrNull
+import android.os.PowerManager
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -33,6 +34,7 @@ class DownloadService : Service() {
     private lateinit var ytDlpEngine: YtDlpEngine
     private lateinit var ffmpegEngine: FFmpegEngine
     private lateinit var mediaStoreManager: MediaStoreManager
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private val activeJobs = ConcurrentHashMap<Long, Job>()
     private val activeTempFiles = ConcurrentHashMap<Long, File>()
@@ -43,6 +45,13 @@ class DownloadService : Service() {
         ytDlpEngine = YtDlpEngine()
         ffmpegEngine = FFmpegEngine()
         mediaStoreManager = MediaStoreManager(this)
+
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Vitre:DownloadService").apply {
+                setReferenceCounted(false)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,6 +81,12 @@ class DownloadService : Service() {
             val notif = createNotification(downloadId, title, "Starting download...", 0, true)
             notificationManager.notify(getNotificationId(downloadId), notif)
         }
+
+        try {
+            if (wakeLock?.isHeld != true) {
+                wakeLock?.acquire(2 * 60 * 60 * 1000L) // 2 hour safety limit
+            }
+        } catch (_: Exception) {}
 
         val job = serviceScope.launch {
             processDownload(downloadId, url, title, formatId, isAudioOnly, isImage, audioFormat, clipStart, clipEnd)
@@ -110,11 +125,12 @@ class DownloadService : Service() {
         val notifId = getNotificationId(downloadId)
         val notification = createNotification(downloadId, title, "Starting download...", 0, true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                notifId,
-                notification,
+            val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+            } else {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
+            }
+            startForeground(notifId, notification, fgsType)
         } else {
             startForeground(notifId, notification)
         }
@@ -399,6 +415,11 @@ class DownloadService : Service() {
         activeTempFiles.remove(id)
 
         if (activeJobs.isEmpty()) {
+            try {
+                if (wakeLock?.isHeld == true) {
+                    wakeLock?.release()
+                }
+            } catch (_: Exception) {}
             stopForeground(STOP_FOREGROUND_DETACH)
             stopSelf()
         }
@@ -454,6 +475,11 @@ class DownloadService : Service() {
     }
 
     override fun onDestroy() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (_: Exception) {}
         serviceScope.cancel()
         super.onDestroy()
     }

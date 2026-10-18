@@ -173,39 +173,52 @@ class FFmpegEngine {
 
             muxer.start()
 
-            // 1. Write Video Samples
             val videoBufSize = if (videoFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
                 videoFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
             } else 1024 * 1024
             val videoBuffer = ByteBuffer.allocate(videoBufSize)
             val videoBufferInfo = MediaCodec.BufferInfo()
 
-            while (true) {
-                videoBufferInfo.offset = 0
-                videoBufferInfo.size = videoExtractor.readSampleData(videoBuffer, 0)
-                if (videoBufferInfo.size < 0) break
-                videoBufferInfo.presentationTimeUs = videoExtractor.sampleTime
-                videoBufferInfo.flags = videoExtractor.sampleFlags
-                muxer.writeSampleData(muxerVideoTrack, videoBuffer, videoBufferInfo)
-                videoExtractor.advance()
-            }
+            val audioBufSize = if (audioFormat?.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) == true) {
+                audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+            } else 256 * 1024
+            val audioBuffer = ByteBuffer.allocate(audioBufSize)
+            val audioBufferInfo = MediaCodec.BufferInfo()
 
-            // 2. Write Audio Samples
-            if (muxerAudioTrack != -1 && audioFormat != null) {
-                val audioBufSize = if (audioFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
-                    audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-                } else 256 * 1024
-                val audioBuffer = ByteBuffer.allocate(audioBufSize)
-                val audioBufferInfo = MediaCodec.BufferInfo()
+            // Synchronously interleave video and audio samples in timestamp order
+            var hasVideo = true
+            var hasAudio = (muxerAudioTrack != -1 && audioFormat != null)
+            var videoSamplesWritten = 0
+            var audioSamplesWritten = 0
 
-                while (true) {
+            while (hasVideo || hasAudio) {
+                val videoTime = if (hasVideo) videoExtractor.sampleTime else Long.MAX_VALUE
+                val audioTime = if (hasAudio) audioExtractor.sampleTime else Long.MAX_VALUE
+
+                if (hasVideo && (!hasAudio || videoTime <= audioTime)) {
+                    videoBufferInfo.offset = 0
+                    videoBufferInfo.size = videoExtractor.readSampleData(videoBuffer, 0)
+                    if (videoBufferInfo.size < 0) {
+                        hasVideo = false
+                    } else {
+                        videoBufferInfo.presentationTimeUs = maxOf(0L, videoExtractor.sampleTime)
+                        videoBufferInfo.flags = videoExtractor.sampleFlags
+                        muxer.writeSampleData(muxerVideoTrack, videoBuffer, videoBufferInfo)
+                        videoSamplesWritten++
+                        videoExtractor.advance()
+                    }
+                } else if (hasAudio) {
                     audioBufferInfo.offset = 0
                     audioBufferInfo.size = audioExtractor.readSampleData(audioBuffer, 0)
-                    if (audioBufferInfo.size < 0) break
-                    audioBufferInfo.presentationTimeUs = audioExtractor.sampleTime
-                    audioBufferInfo.flags = audioExtractor.sampleFlags
-                    muxer.writeSampleData(muxerAudioTrack, audioBuffer, audioBufferInfo)
-                    audioExtractor.advance()
+                    if (audioBufferInfo.size < 0) {
+                        hasAudio = false
+                    } else {
+                        audioBufferInfo.presentationTimeUs = maxOf(0L, audioExtractor.sampleTime)
+                        audioBufferInfo.flags = audioExtractor.sampleFlags
+                        muxer.writeSampleData(muxerAudioTrack, audioBuffer, audioBufferInfo)
+                        audioSamplesWritten++
+                        audioExtractor.advance()
+                    }
                 }
             }
 
@@ -304,7 +317,9 @@ class FFmpegEngine {
 
             val buffer = ByteBuffer.allocate(2 * 1024 * 1024)
             val bufferInfo = MediaCodec.BufferInfo()
-            val trackBaseTimeUs = mutableMapOf<Int, Long>()
+            var firstVideoKeyframeSeen = false
+            var videoBaseUs = -1L
+            var audioBaseUs = -1L
 
             while (true) {
                 val trackIndex = extractor.sampleTrackIndex
@@ -317,16 +332,37 @@ class FFmpegEngine {
                     break
                 }
 
-                if (sampleTimeUs >= startUs) {
-                    val base = trackBaseTimeUs.getOrPut(trackIndex) { sampleTimeUs }
-                    val muxerTrack = trackMap[trackIndex]
-                    if (muxerTrack != null) {
-                        bufferInfo.offset = 0
-                        bufferInfo.size = extractor.readSampleData(buffer, 0)
-                        if (bufferInfo.size > 0) {
-                            bufferInfo.presentationTimeUs = maxOf(0L, sampleTimeUs - base)
-                            bufferInfo.flags = extractor.sampleFlags
-                            muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
+                val isVideo = (trackIndex == videoTrackIndex)
+                val muxerTrack = trackMap[trackIndex]
+
+                if (muxerTrack != null) {
+                    val flags = extractor.sampleFlags
+                    val isKey = (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
+
+                    if (isVideo && !firstVideoKeyframeSeen) {
+                        if (isKey || sampleTimeUs >= startUs) {
+                            firstVideoKeyframeSeen = true
+                            videoBaseUs = sampleTimeUs
+                        } else {
+                            if (!extractor.advance()) break
+                            continue
+                        }
+                    }
+
+                    if (firstVideoKeyframeSeen || !isVideo) {
+                        if (sampleTimeUs >= (startUs - 1_000_000L)) {
+                            val base = if (isVideo) videoBaseUs else {
+                                if (audioBaseUs == -1L) audioBaseUs = sampleTimeUs
+                                audioBaseUs
+                            }
+
+                            bufferInfo.offset = 0
+                            bufferInfo.size = extractor.readSampleData(buffer, 0)
+                            if (bufferInfo.size > 0) {
+                                bufferInfo.presentationTimeUs = maxOf(0L, sampleTimeUs - base)
+                                bufferInfo.flags = flags
+                                muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
+                            }
                         }
                     }
                 }
