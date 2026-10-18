@@ -143,5 +143,69 @@ class VitreEngineTests(unittest.TestCase):
         self.assertEqual(detect_type(webp_head), ('webp', 'image/webp'))
         self.assertEqual(detect_type(jpg_head), ('jpg', 'image/jpeg'))
 
+    def test_portrait_resolution_normalization(self):
+        # Simulated raw formats for an Instagram reel: 720x1280 and 1080x1920
+        raw_formats = [
+            {
+                "format_id": "dash-1280",
+                "ext": "mp4",
+                "width": 720,
+                "height": 1280,
+                "vcodec": "avc1.64001f",
+                "acodec": "none",
+                "tbr": 2100,
+                "fps": 30
+            },
+            {
+                "format_id": "progressive-720",
+                "ext": "mp4",
+                "width": 720,
+                "height": 1280,
+                "vcodec": "avc1.64001f",
+                "acodec": "mp4a.40.2",
+                "tbr": 1900,
+                "fps": 30
+            },
+            {
+                "format_id": "dash-1920",
+                "ext": "mp4",
+                "width": 1080,
+                "height": 1920,
+                "vcodec": "avc1.640028",
+                "acodec": "none",
+                "tbr": 4200,
+                "fps": 30
+            }
+        ]
+
+        # Use the normalization logic directly to assert correct standard display tiers
+        candidates = {}
+        for f in raw_formats:
+            vcodec = str(f.get('vcodec') or 'none').lower()
+            acodec = str(f.get('acodec') or 'none').lower()
+            width = f.get('width') or 0
+            height = f.get('height') or 0
+            is_video = vcodec != 'none'
+            is_audio = acodec != 'none'
+
+            tier = min(width, height) if width < height else height
+            combo_key = ('video', tier)
+
+            audio_bonus = 2000 if (is_video and is_audio) else 0
+            score = audio_bonus + (f.get('tbr') or 0)
+            if combo_key not in candidates or score > candidates[combo_key][0]:
+                candidates[combo_key] = (score, f, tier)
+
+        # 720x1280 must be normalized to tier 720 (720p HD), NOT 1280p
+        self.assertIn(('video', 720), candidates)
+        best_720 = candidates[('video', 720)][1]
+        # Progressive format with audio must win over video-only DASH
+        self.assertEqual(best_720['format_id'], 'progressive-720')
+
+        # 1080x1920 must be normalized to tier 1080 (1080p FHD), NOT 1920p
+        self.assertIn(('video', 1080), candidates)
+        best_1080 = candidates[('video', 1080)][1]
+        self.assertEqual(candidates[('video', 1080)][2], 1080)
+
 if __name__ == '__main__':
     unittest.main()

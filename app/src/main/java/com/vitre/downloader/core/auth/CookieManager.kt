@@ -76,8 +76,121 @@ class CookieManager(private val context: Context) {
 
             Result.success(validCookieCount)
         } catch (e: Exception) {
-            // Note: Exception message does NOT expose any cookie contents
             Result.failure(Exception("Failed to process cookie file: ${e.localizedMessage}"))
         }
+    }
+
+    /**
+     * Extracts and merges session cookies from an in-app WebView session.
+     * Formats cookies to standard Netscape cookies.txt specification.
+     */
+    suspend fun saveCookiesFromWeb(url: String, cookieHeader: String): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            if (cookieHeader.isBlank()) {
+                return@withContext Result.failure(Exception("No cookies found in current session"))
+            }
+
+            val host = try {
+                Uri.parse(url).host?.lowercase() ?: ""
+            } catch (_: Exception) { "" }
+
+            val domains = when {
+                host.contains("youtube.com") || host.contains("google.com") -> listOf(".youtube.com", ".google.com")
+                host.contains("instagram.com") -> listOf(".instagram.com")
+                host.contains("tiktok.com") -> listOf(".tiktok.com")
+                host.contains("twitter.com") || host.contains("x.com") -> listOf(".x.com", ".twitter.com")
+                host.contains("facebook.com") -> listOf(".facebook.com")
+                host.isNotEmpty() -> {
+                    val root = host.removePrefix("www.").removePrefix("m.")
+                    listOf(if (root.startsWith(".")) root else ".$root")
+                }
+                else -> listOf(".youtube.com")
+            }
+
+            // Read existing cookies to merge and preserve across platforms
+            val existingCookies = mutableMapOf<String, String>()
+            if (cookieFile.exists() && cookieFile.length() > 0) {
+                cookieFile.forEachLine { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                        val parts = trimmed.split("\t")
+                        if (parts.size >= 7) {
+                            val key = "${parts[0].lowercase()}:${parts[5]}"
+                            existingCookies[key] = line
+                        }
+                    }
+                }
+            }
+
+            val expiry = (System.currentTimeMillis() / 1000) + 315360000L // 10 years in the future
+            var addedCount = 0
+
+            val cookiePairs = cookieHeader.split(";")
+            for (pair in cookiePairs) {
+                val trimmed = pair.trim()
+                if (trimmed.isEmpty() || !trimmed.contains("=")) continue
+
+                val name = trimmed.substringBefore("=").trim()
+                val value = trimmed.substringAfter("=").trim()
+                if (name.isEmpty() || value.isEmpty()) continue
+
+                for (domain in domains) {
+                    val netscapeLine = "$domain\tTRUE\t/\tTRUE\t$expiry\t$name\t$value"
+                    val key = "${domain.lowercase()}:$name"
+                    existingCookies[key] = netscapeLine
+                    addedCount++
+                }
+            }
+
+            if (addedCount == 0) {
+                return@withContext Result.failure(Exception("No valid cookies could be parsed"))
+            }
+
+            // Write merged cookies with standard Netscape header
+            cookieFile.bufferedWriter().use { writer ->
+                writer.write("# Netscape HTTP Cookie File")
+                writer.newLine()
+                writer.write("# Generated automatically by Vitre Downloader In-App Extractor")
+                writer.newLine()
+                writer.newLine()
+                for (line in existingCookies.values) {
+                    writer.write(line)
+                    writer.newLine()
+                }
+            }
+
+            Result.success(existingCookies.size)
+        } catch (e: Exception) {
+            Result.failure(Exception("Failed to save cookies: ${e.localizedMessage}"))
+        }
+    }
+
+    /**
+     * Returns human-readable platform names that currently have saved cookies.
+     */
+    fun getActiveDomains(): List<String> {
+        if (!hasCookies()) return emptyList()
+        val domains = mutableSetOf<String>()
+        try {
+            cookieFile.forEachLine { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                    val parts = trimmed.split("\t")
+                    if (parts.isNotEmpty()) {
+                        val d = parts[0].removePrefix(".").lowercase()
+                        when {
+                            d.contains("youtube") -> domains.add("YouTube")
+                            d.contains("google") -> domains.add("Google")
+                            d.contains("instagram") -> domains.add("Instagram")
+                            d.contains("tiktok") -> domains.add("TikTok")
+                            d.contains("twitter") || d.contains("x.com") -> domains.add("Twitter / X")
+                            d.contains("facebook") -> domains.add("Facebook")
+                            else -> domains.add(d)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return domains.toList().sorted()
     }
 }

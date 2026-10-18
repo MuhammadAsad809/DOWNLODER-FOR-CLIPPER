@@ -102,7 +102,9 @@ data class IosNotificationState(
     val subtitle: String? = null,
     val icon: ImageVector? = null,
     val iconColor: Color = Color(0xFF00D2FF),
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val actionText: String? = null,
+    val onActionClick: (() -> Unit)? = null
 )
 
 /**
@@ -123,6 +125,7 @@ fun HomeScreen(
     recentDownloads: List<DownloadEntity>,
     errorMessage: String?,
     onClearError: () -> Unit,
+    onOpenCookieAuth: () -> Unit = {},
     defaultQuality: String = "best",
     defaultAudioFormat: String = "mp3",
     modifier: Modifier = Modifier
@@ -149,14 +152,23 @@ fun HomeScreen(
 
     LaunchedEffect(errorMessage) {
         if (errorMessage != null) {
+            val isAuthRelated = errorMessage.contains("sign in", ignoreCase = true) ||
+                    errorMessage.contains("bot", ignoreCase = true) ||
+                    errorMessage.contains("cookie", ignoreCase = true) ||
+                    errorMessage.contains("login", ignoreCase = true) ||
+                    errorMessage.contains("access", ignoreCase = true) ||
+                    errorMessage.contains("empty media", ignoreCase = true)
+
             activeNotification = IosNotificationState(
-                title = "Inspection Notice",
-                subtitle = errorMessage,
-                icon = Icons.Default.WarningAmber,
-                iconColor = Color(0xFFFF5252),
-                isLoading = false
+                title = if (isAuthRelated) "Authentication Required" else "Inspection Notice",
+                subtitle = if (isAuthRelated) "Tap to sign in with YouTube or Instagram" else errorMessage,
+                icon = if (isAuthRelated) Icons.Default.Key else Icons.Default.WarningAmber,
+                iconColor = if (isAuthRelated) Color(0xFF00D2FF) else Color(0xFFFF5252),
+                isLoading = false,
+                actionText = if (isAuthRelated) "Sign In" else null,
+                onActionClick = if (isAuthRelated) onOpenCookieAuth else null
             )
-            delay(4000)
+            delay(if (isAuthRelated) 8000 else 4000)
             activeNotification = null
         }
     }
@@ -597,6 +609,27 @@ fun IosDynamicIslandNotification(
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Optional Interactive Action Button (e.g. Sign In)
+            if (!notification.actionText.isNullOrBlank() && notification.onActionClick != null) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF00D2FF))
+                        .clickable {
+                            notification.onActionClick.invoke()
+                            onDismiss()
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = notification.actionText,
+                        color = Color.Black,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }

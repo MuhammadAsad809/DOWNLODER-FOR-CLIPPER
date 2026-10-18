@@ -240,6 +240,7 @@ class MainActivity : ComponentActivity() {
                                     recentDownloads = downloads,
                                     errorMessage = inspectionError,
                                     onClearError = { inspectionError = null },
+                                    onOpenCookieAuth = { activeSubScreen = "cookies" },
                                     defaultQuality = defaultQuality,
                                     defaultAudioFormat = defaultAudioFormat
                                 )

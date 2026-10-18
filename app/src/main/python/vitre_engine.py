@@ -147,7 +147,7 @@ def inspect_url(url, cookies_path=None):
         'ignoreerrors': False,
         'extractor_args': {
             'youtube': {
-                'player_client': ['visionos', 'web']
+                'player_client': ['android', 'ios', 'web']
             },
             'instagram': {
                 'api': ['graphql', 'web']
@@ -238,13 +238,18 @@ def inspect_url(url, cookies_path=None):
     formats = []
     raw_formats = info.get('formats', [])
     candidates = {}
+    has_standalone_audio = any(
+        (str(f.get('vcodec') or 'none').lower() == 'none' and str(f.get('acodec') or 'none').lower() != 'none')
+        for f in raw_formats
+    )
 
     for f in raw_formats:
         fid = f.get('format_id')
         ext = f.get('ext')
         vcodec = str(f.get('vcodec') or 'none').lower()
         acodec = str(f.get('acodec') or 'none').lower()
-        height = f.get('height')
+        width = f.get('width') or 0
+        height = f.get('height') or 0
         filesize = f.get('filesize') or f.get('filesize_approx') or 0
         fps = f.get('fps') or 0
         tbr = f.get('tbr') or 0
@@ -261,28 +266,56 @@ def inspect_url(url, cookies_path=None):
         if 'bytevc1' in vcodec:
             continue
 
-        # Format label (e.g. 1080p, 720p, 480p, Audio Only, Image)
-        if is_video and height:
-            resolution_label = f"{height}p"
+        # Format label with vertical video normalization (e.g. 1080x1920 -> 1080p Full HD, 720x1280 -> 720p HD)
+        tier = 0
+        if is_video:
+            if width > 0 and height > 0:
+                tier = min(width, height) if width < height else height
+            elif height in (1920, 1080):
+                tier = 1080
+            elif height in (1280, 720):
+                tier = 720
+            elif height in (854, 480):
+                tier = 480
+            elif height in (640, 360):
+                tier = 360
+            else:
+                tier = height or 0
+
+            if tier >= 2160:
+                resolution_label = f"{tier}p (4K UHD)"
+            elif tier >= 1440:
+                resolution_label = f"{tier}p (2K QHD)"
+            elif tier >= 1080:
+                resolution_label = f"{tier}p (Full HD)"
+            elif tier >= 720:
+                resolution_label = f"{tier}p (HD)"
+            elif tier > 0:
+                resolution_label = f"{tier}p"
+            else:
+                resolution_label = "Video"
+            combo_key = ('video', tier)
         elif is_audio and not is_video:
             resolution_label = f"Audio ({ext})"
+            combo_key = ('audio', ext)
         elif is_image:
             resolution_label = f"Image ({ext.upper()})"
+            combo_key = ('image', ext)
         else:
             resolution_label = ext
+            combo_key = (resolution_label, ext)
 
-        combo_key = (resolution_label, ext, is_video, is_audio, is_image)
-
-        # Quality scoring to keep highest quality variant for each tier
-        total_bitrate = tbr or (vbr + abr)
+        # Quality scoring: strongly prefer progressive streams with sound so videos have working audio out-of-the-box
+        audio_bonus = 2000 if (is_video and is_audio) else 0
         codec_bonus = 50 if ('avc1' in vcodec or 'h264' in vcodec or 'mp4a' in acodec or 'aac' in acodec) else 0
-        quality_score = (total_bitrate + codec_bonus, filesize, fps)
+        total_bitrate = tbr or (vbr + abr)
+        quality_score = (audio_bonus + total_bitrate + codec_bonus, filesize, fps)
 
         candidate_data = {
             "format_id": fid,
             "ext": ext,
             "resolution": resolution_label,
-            "height": height or 0,
+            "height": tier if is_video else (height or 0),
             "filesize": filesize or 0,
             "is_video": is_video,
             "is_audio": is_audio,
@@ -291,7 +324,7 @@ def inspect_url(url, cookies_path=None):
             "acodec": acodec,
             "fps": fps or 0,
             "tbr": tbr or 0,
-            "needs_audio": (is_video and not is_audio),
+            "needs_audio": (is_video and not is_audio and has_standalone_audio),
             "direct_url": f.get('url') or ''
         }
 
@@ -427,7 +460,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         'quiet': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['visionos', 'web']
+                'player_client': ['android', 'ios', 'web']
             },
             'instagram': {
                 'api': ['graphql', 'web']
@@ -458,7 +491,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         if is_audio_only:
             a_opts = dict(base_opts)
             if audio_format in ['m4a', 'aac']:
-                a_opts['format'] = f"{format_id}/140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best" if format_id and format_id not in ['best', 'audio_only', 'bestaudio'] else '140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
+                a_opts['format'] = f"{format_id}/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best" if format_id and format_id not in ['best', 'audio_only', 'bestaudio'] else 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
             elif audio_format in ['opus', 'ogg', 'webm']:
                 a_opts['format'] = f"{format_id}/bestaudio[ext=opus]/bestaudio[ext=webm]/bestaudio/best" if format_id and format_id not in ['best', 'audio_only', 'bestaudio'] else 'bestaudio[ext=opus]/bestaudio[ext=webm]/bestaudio/best'
             else:
@@ -478,6 +511,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
 
         # Check format characteristics with robust string conversion
         is_video_only = False
+        has_standalone_audio = False
         try:
             inspect_opts = dict(base_opts)
             inspect_opts['skip_download'] = True
@@ -485,17 +519,18 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
                 info = ydl.extract_info(canonical_url, download=False)
                 if info:
                     for f in info.get('formats', []):
+                        v_c = str(f.get('vcodec') or 'none').lower()
+                        a_c = str(f.get('acodec') or 'none').lower()
+                        if v_c == 'none' and a_c != 'none':
+                            has_standalone_audio = True
                         if f.get('format_id') == format_id:
-                            vcodec = str(f.get('vcodec') or 'none').lower()
-                            acodec = str(f.get('acodec') or 'none').lower()
-                            if vcodec != 'none' and acodec == 'none':
+                            if v_c != 'none' and a_c == 'none':
                                 is_video_only = True
-                            break
         except Exception:
             pass
 
-        if is_video_only:
-            # Video stream
+        # Only attempt separate video + audio download if standalone audio stream actually exists
+        if is_video_only and has_standalone_audio:
             video_tmp = f"{output_path}.video.tmp"
             audio_tmp = f"{output_path}.audio.tmp"
 
@@ -509,29 +544,45 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
 
             # Audio stream (prefer AAC / m4a for instant MP4 muxing)
             a_opts = dict(base_opts)
-            a_opts['format'] = '140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
+            a_opts['format'] = 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best'
             a_opts['outtmpl'] = audio_tmp
             a_opts['progress_hooks'] = [make_hook("audio")]
 
-            with yt_dlp.YoutubeDL(a_opts) as ydl:
-                ydl.download([canonical_url])
+            audio_download_ok = False
+            try:
+                with yt_dlp.YoutubeDL(a_opts) as ydl:
+                    ydl.download([canonical_url])
+                if os.path.exists(audio_tmp) and os.path.getsize(audio_tmp) > 512:
+                    audio_download_ok = True
+            except Exception:
+                audio_download_ok = False
 
-            return json.dumps({
-                "success": True,
-                "needs_muxing": True,
-                "video_path": video_tmp,
-                "audio_path": audio_tmp,
-                "output_path": output_path
-            })
-        else:
-            # Combined / Progressive format
-            c_opts = dict(base_opts)
-            c_opts['format'] = f"{format_id}/best" if format_id else 'best'
-            c_opts['outtmpl'] = output_path
-            c_opts['progress_hooks'] = [make_hook("single")]
+            if audio_download_ok:
+                return json.dumps({
+                    "success": True,
+                    "needs_muxing": True,
+                    "video_path": video_tmp,
+                    "audio_path": audio_tmp,
+                    "output_path": output_path
+                })
+            else:
+                # If audio failed, clean up video tmp and fallback to progressive combined download
+                try:
+                    if os.path.exists(video_tmp):
+                        os.remove(video_tmp)
+                    if os.path.exists(audio_tmp):
+                        os.remove(audio_tmp)
+                except Exception:
+                    pass
 
-            with yt_dlp.YoutubeDL(c_opts) as ydl:
-                ydl.download([canonical_url])
+        # Combined / Progressive format (preferred for Instagram, TikTok, Facebook, Twitter)
+        c_opts = dict(base_opts)
+        c_opts['format'] = f"{format_id}/best[ext=mp4]/best" if format_id else 'best[ext=mp4]/best'
+        c_opts['outtmpl'] = output_path
+        c_opts['progress_hooks'] = [make_hook("single")]
+
+        with yt_dlp.YoutubeDL(c_opts) as ydl:
+            ydl.download([canonical_url])
 
             # Validate output file
             if os.path.exists(output_path):
