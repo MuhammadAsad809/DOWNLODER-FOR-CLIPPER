@@ -39,6 +39,7 @@ data class FormatOption(
 enum class DownloadStatus {
     QUEUED,
     DOWNLOADING,
+    PAUSED,
     PROCESSING,
     COMPLETED,
     FAILED,

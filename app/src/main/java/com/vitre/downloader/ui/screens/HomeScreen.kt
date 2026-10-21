@@ -1927,8 +1927,23 @@ fun RecentDownloadGlassItem(item: DownloadEntity) {
                     )
                     Text(
                         text = item.status,
-                        color = Color(0xFF8E9BB0),
-                        fontSize = 12.sp
+                        color = if (item.status.contains("PAUSED", ignoreCase = true)) Color(0xFFFFB300) else Color(0xFF8E9BB0),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (item.status != "COMPLETED" && item.progress in 0.01f..0.99f) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { item.progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = if (item.status.contains("PAUSED", ignoreCase = true)) Color(0xFFFFB300) else Color(0xFF00D2FF),
+                        trackColor = Color(0xFF161F30)
                     )
                 }
             }

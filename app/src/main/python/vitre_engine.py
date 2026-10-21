@@ -343,24 +343,55 @@ def extract_direct_media_fallback(url):
     return None
 
 def download_stream_chunked(direct_url, output_path, callback=None):
-    """Download direct media URL chunk-by-chunk with cooperative cancellation check."""
+    """Download direct media URL chunk-by-chunk with HTTP Range resumption and cooperative cancellation check."""
     req = urllib.request.Request(direct_url, headers={'User-Agent': DEFAULT_USER_AGENT})
-    with urllib.request.urlopen(req, timeout=45) as resp:
-        total_size = int(resp.headers.get('content-length', 0))
-        downloaded = 0
+    existing_bytes = 0
+    if os.path.exists(output_path):
+        try:
+            existing_bytes = os.path.getsize(output_path)
+            if existing_bytes > 0:
+                req.add_header('Range', f'bytes={existing_bytes}-')
+        except Exception:
+            existing_bytes = 0
+
+    mode = 'ab' if existing_bytes > 0 else 'wb'
+    try:
+        resp = urllib.request.urlopen(req, timeout=45)
+    except urllib.error.HTTPError as e:
+        if e.code in (416, 400): # Range invalid or already full; retry from start
+            req = urllib.request.Request(direct_url, headers={'User-Agent': DEFAULT_USER_AGENT})
+            resp = urllib.request.urlopen(req, timeout=45)
+            existing_bytes = 0
+            mode = 'wb'
+        else:
+            raise e
+
+    with resp:
+        # If server ignores Range header and returns 200 OK, rewrite from beginning
+        if resp.status == 200 and existing_bytes > 0:
+            existing_bytes = 0
+            mode = 'wb'
+
+        content_length = int(resp.headers.get('content-length', 0))
+        total_size = existing_bytes + content_length
+        downloaded = existing_bytes
         start_time = time.time()
-        with open(output_path, 'wb') as f:
+        last_callback_time = 0.0
+
+        with open(output_path, mode) as f:
             while True:
                 if check_cancellation(output_path):
                     raise InterruptedError("Download cancelled by user")
-                chunk = resp.read(64 * 1024)
+                chunk = resp.read(256 * 1024) # 256 KB chunk for high-speed download
                 if not chunk:
                     break
                 f.write(chunk)
                 downloaded += len(chunk)
-                if callback:
-                    elapsed = max(time.time() - start_time, 0.001)
-                    speed = downloaded / elapsed
+                now = time.time()
+                if callback and (now - last_callback_time >= 0.25 or (total_size > 0 and downloaded >= total_size)):
+                    last_callback_time = now
+                    elapsed = max(now - start_time, 0.001)
+                    speed = (downloaded - existing_bytes) / elapsed
                     eta = (total_size - downloaded) / speed if speed > 0 and total_size > 0 else 0
                     pct = (downloaded / total_size) if total_size > 0 else 0.0
                     callback(json.dumps({
@@ -778,6 +809,12 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         'no_warnings': True,
         'quiet': True,
         'hls_prefer_native': True,
+        'continuedl': True,
+        'buffersize': 1024 * 1024,
+        'http_chunk_size': 10485760,
+        'concurrent_fragment_downloads': 4,
+        'retries': 10,
+        'fragment_retries': 10,
         'http_headers': {
             'User-Agent': DEFAULT_USER_AGENT,
             'Accept-Language': 'en-US,en;q=0.9',

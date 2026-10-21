@@ -36,14 +36,22 @@ fun DownloadsScreen(
     downloads: List<DownloadEntity>,
     onDeleteDownload: (DownloadEntity) -> Unit,
     onPlayMedia: (DownloadEntity) -> Unit,
+    onCancelDownload: (DownloadEntity) -> Unit = {},
+    onPauseDownload: (DownloadEntity) -> Unit = {},
+    onResumeDownload: (DownloadEntity) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("All", "Video", "Audio")
 
+    // Active Downloads: include any item that is downloading, queued, paused, or processing
     val activeDownloads = remember(downloads) {
-        downloads.filter { it.status == DownloadStatus.DOWNLOADING.name || it.status == DownloadStatus.QUEUED.name }
+        downloads.filter {
+            it.status != DownloadStatus.COMPLETED.name &&
+            it.status != DownloadStatus.FAILED.name &&
+            it.status != DownloadStatus.CANCELLED.name
+        }
     }
 
     val completedDownloads = remember(downloads, selectedTab) {
@@ -75,21 +83,29 @@ fun DownloadsScreen(
                 item {
                     Text(
                         text = "Active Queue (${activeDownloads.size})",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = ElectricBlue
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                items(activeDownloads) { item ->
+                items(activeDownloads, key = { it.id }) { item ->
                     ActiveDownloadCard(
                         item = item,
                         onCancel = {
+                            onCancelDownload(item)
                             val cancelIntent = Intent(context, DownloadService::class.java).apply {
                                 action = DownloadService.ACTION_CANCEL
                                 putExtra(DownloadService.EXTRA_DOWNLOAD_ID, item.id)
                             }
                             context.startService(cancelIntent)
+                        },
+                        onPause = {
+                            onPauseDownload(item)
+                            DownloadService.pauseDownload(context, item.id)
+                        },
+                        onResume = {
+                            onResumeDownload(item)
                         }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -167,13 +183,17 @@ fun DownloadsScreen(
 @Composable
 fun ActiveDownloadCard(
     item: DownloadEntity,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit
 ) {
     val animatedProgress by androidx.compose.animation.core.animateFloatAsState(
         targetValue = item.progress.coerceIn(0f, 1f),
         animationSpec = androidx.compose.animation.core.tween(300),
         label = "DownloadProgressAnimation"
     )
+
+    val isPaused = item.status.contains("PAUSED", ignoreCase = true)
 
     GlassSurface(
         modifier = Modifier.fillMaxWidth(),
@@ -223,20 +243,34 @@ fun ActiveDownloadCard(
                     Text(
                         text = item.resolution,
                         style = MaterialTheme.typography.bodySmall,
-                        color = ElectricBlue
+                        color = if (isPaused) androidx.compose.ui.graphics.Color(0xFFFFB300) else ElectricBlue
                     )
                 }
 
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Cancel Download",
-                        tint = ErrorRed,
-                        modifier = Modifier.size(20.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = if (isPaused) onResume else onPause,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (isPaused) "Resume Download" else "Pause Download",
+                            tint = if (isPaused) ElectricBlue else androidx.compose.ui.graphics.Color(0xFFFFB300),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onCancel,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel Download",
+                            tint = ErrorRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
@@ -248,7 +282,7 @@ fun ActiveDownloadCard(
                     .fillMaxWidth()
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
-                color = ElectricBlue,
+                color = if (isPaused) androidx.compose.ui.graphics.Color(0xFFFFB300) else ElectricBlue,
                 trackColor = CardSurface
             )
 
@@ -262,12 +296,12 @@ fun ActiveDownloadCard(
                 Text(
                     text = "${(animatedProgress * 100).toInt()}%",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = ElectricBlue
+                    color = if (isPaused) androidx.compose.ui.graphics.Color(0xFFFFB300) else ElectricBlue
                 )
                 Text(
-                    text = item.status,
+                    text = if (isPaused) "Paused • Tap play to resume" else item.status,
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = if (isPaused) androidx.compose.ui.graphics.Color(0xFFFFB300) else TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

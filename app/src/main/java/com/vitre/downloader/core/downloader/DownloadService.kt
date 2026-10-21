@@ -38,6 +38,7 @@ class DownloadService : Service() {
 
     private val activeJobs = ConcurrentHashMap<Long, Job>()
     private val activeTempFiles = ConcurrentHashMap<Long, File>()
+    private val pausedDownloads = ConcurrentHashMap.newKeySet<Long>()
 
     override fun onCreate() {
         super.onCreate()
@@ -63,6 +64,13 @@ class DownloadService : Service() {
             }
             return START_NOT_STICKY
         }
+        if (action == ACTION_PAUSE) {
+            val pauseId = intent.getLongExtra(EXTRA_DOWNLOAD_ID, -1L)
+            if (pauseId != -1L) {
+                handlePauseDownload(pauseId)
+            }
+            return START_NOT_STICKY
+        }
 
         val url = intent?.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
         val title = intent.getStringExtra(EXTRA_TITLE) ?: "Downloading Media"
@@ -73,6 +81,8 @@ class DownloadService : Service() {
         val downloadId = intent.getLongExtra(EXTRA_DOWNLOAD_ID, System.currentTimeMillis())
         val clipStart = if (intent.hasExtra(EXTRA_CLIP_START)) intent.getLongExtra(EXTRA_CLIP_START, -1L).takeIf { it >= 0 } else null
         val clipEnd = if (intent.hasExtra(EXTRA_CLIP_END)) intent.getLongExtra(EXTRA_CLIP_END, -1L).takeIf { it >= 0 } else null
+
+        pausedDownloads.remove(downloadId)
 
         val isFirstJob = activeJobs.isEmpty()
         if (isFirstJob) {
@@ -96,7 +106,40 @@ class DownloadService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun handlePauseDownload(id: Long) {
+        val notifId = getNotificationId(id)
+        pausedDownloads.add(id)
+
+        // 1. Touch cooperative cancel file so download loop gracefully stops and saves progress
+        activeTempFiles[id]?.let { file ->
+            try {
+                File("${file.absolutePath}.cancel").createNewFile()
+            } catch (_: Exception) {}
+        }
+
+        // 2. Cancel coroutine job
+        activeJobs[id]?.cancel()
+        activeJobs.remove(id)
+
+        // 3. Update database status to PAUSED (preserve temp file for resuming!)
+        val db = (application as VitreApplication).database
+        serviceScope.launch {
+            db.downloadDao().updateStatus(id, DownloadStatus.PAUSED.name)
+        }
+
+        // 4. Update notification
+        val notif = createNotification(id, "Vitre Download", "Download paused", 0, false)
+        notificationManager.notify(notifId, notif)
+
+        if (activeJobs.isEmpty()) {
+            try {
+                if (wakeLock?.isHeld == true) wakeLock?.release()
+            } catch (_: Exception) {}
+        }
+    }
+
     private fun handleCancelDownload(id: Long) {
+        pausedDownloads.remove(id)
         val notifId = getNotificationId(id)
         // 1. Touch cooperative cancel file
         activeTempFiles[id]?.let { file ->
@@ -117,7 +160,7 @@ class DownloadService : Service() {
         // 4. Cancel notification
         notificationManager.cancel(notifId)
 
-        // 5. Clean up tracking
+        // 5. Clean up tracking and files
         cleanupAndFinish(id, listOfNotNull(activeTempFiles[id]))
     }
 
@@ -193,13 +236,20 @@ class DownloadService : Service() {
         }
 
         if (dlResult.isFailure || !activeJobs.containsKey(id)) {
+            val isPaused = pausedDownloads.remove(id)
+            if (isPaused) {
+                // Cooperative pause requested: Keep partial files intact for smooth resume!
+                activeTempFiles.remove(id)
+                activeJobs.remove(id)
+                return
+            }
             val isCancelled = !activeJobs.containsKey(id) || dlResult.exceptionOrNull() is CancellationException
             val status = if (isCancelled) DownloadStatus.CANCELLED else DownloadStatus.FAILED
             val msg = if (isCancelled) "Download cancelled" else "Download failed"
             val errorNotif = createNotification(id, title, msg, 0, false)
             notificationManager.notify(notifId, errorNotif)
             downloadDao.updateStatus(id, status.name)
-            cleanupAndFinish(id, listOf(tempFile, File("${tempFile.absolutePath}.video.tmp"), File("${tempFile.absolutePath}.audio.tmp")))
+            cleanupAndFinish(id, listOf(tempFile, File("${tempFile.absolutePath}.video.tmp"), File("${tempFile.absolutePath}.audio.tmp"), File("${tempFile.absolutePath}.part")))
             return
         }
 
@@ -543,6 +593,7 @@ class DownloadService : Service() {
         fun getNotificationId(downloadId: Long): Int = (downloadId % 100000).toInt() + 1000
 
         const val ACTION_CANCEL = "com.vitre.downloader.ACTION_CANCEL"
+        const val ACTION_PAUSE = "com.vitre.downloader.ACTION_PAUSE"
         const val EXTRA_DOWNLOAD_ID = "EXTRA_DOWNLOAD_ID"
         const val EXTRA_URL = "EXTRA_URL"
         const val EXTRA_TITLE = "EXTRA_TITLE"
@@ -552,6 +603,14 @@ class DownloadService : Service() {
         const val EXTRA_AUDIO_FORMAT = "EXTRA_AUDIO_FORMAT"
         const val EXTRA_CLIP_START = "EXTRA_CLIP_START"
         const val EXTRA_CLIP_END = "EXTRA_CLIP_END"
+
+        fun pauseDownload(context: Context, id: Long) {
+            val intent = Intent(context, DownloadService::class.java).apply {
+                action = ACTION_PAUSE
+                putExtra(EXTRA_DOWNLOAD_ID, id)
+            }
+            context.startService(intent)
+        }
 
         fun startDownload(
             context: Context,

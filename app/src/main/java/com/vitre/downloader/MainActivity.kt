@@ -268,6 +268,28 @@ class MainActivity : ComponentActivity() {
                                                 ).show()
                                             }
                                         }
+                                    },
+                                    onCancelDownload = { item ->
+                                        val cancelIntent = Intent(this@MainActivity, DownloadService::class.java).apply {
+                                            action = DownloadService.ACTION_CANCEL
+                                            putExtra(DownloadService.EXTRA_DOWNLOAD_ID, item.id)
+                                        }
+                                        startService(cancelIntent)
+                                    },
+                                    onPauseDownload = { item ->
+                                        DownloadService.pauseDownload(this@MainActivity, item.id)
+                                    },
+                                    onResumeDownload = { item ->
+                                        DownloadService.startDownload(
+                                            context = this@MainActivity,
+                                            id = item.id,
+                                            url = item.url,
+                                            title = item.title,
+                                            formatId = item.formatId,
+                                            isAudioOnly = item.resolution.contains("audio", ignoreCase = true),
+                                            audioFormat = if (item.resolution.contains("aac", ignoreCase = true) || item.resolution.contains("m4a", ignoreCase = true)) "m4a" else "mp3",
+                                            isImage = item.resolution.contains("image", ignoreCase = true)
+                                        )
                                     }
                                 )
                             }
