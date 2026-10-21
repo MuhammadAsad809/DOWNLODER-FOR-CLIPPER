@@ -777,6 +777,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
     base_opts = {
         'no_warnings': True,
         'quiet': True,
+        'hls_prefer_native': True,
         'http_headers': {
             'User-Agent': DEFAULT_USER_AGENT,
             'Accept-Language': 'en-US,en;q=0.9',

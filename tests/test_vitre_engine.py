@@ -369,6 +369,18 @@ class VitreEngineTests(unittest.TestCase):
         self.assertTrue(any(clean1.endswith(ext) for ext in media_exts))
         self.assertTrue(any(clean2.endswith(ext) for ext in media_exts))
 
+    def test_kick_url_patterns(self):
+        # Kick live, clip, and VOD URLs must be handled appropriately
+        import re
+        clip_pat = r'https?://(?:www\.)?kick\.com/[\w-]+(?:/clips/|/?\?(?:[^#]+&)?clip=)(?P<id>clip_[\w-]+)'
+        vod_pat = r'https?://(?:www\.)?kick\.com/[\w-]+/videos/(?P<id>[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12})'
+
+        c_url = "https://kick.com/iceposeidon?clip=clip_01M5E6TAHMBPHJKNTZD8TWGWFZ"
+        v_url = "https://kick.com/iceposeidon/videos/a090e010-bd5e-4290-b2bb-cb343249d4fc"
+
+        self.assertTrue(bool(re.match(clip_pat, c_url)))
+        self.assertTrue(bool(re.match(vod_pat, v_url)))
+
 if __name__ == '__main__':
     unittest.main()
 
