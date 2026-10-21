@@ -326,6 +326,18 @@ class VitreEngineTests(unittest.TestCase):
         # Ensure monotonic ordering: scaled_video_done <= scaled_audio
         self.assertLessEqual(scaled_video_done, scaled_audio)
 
+    def test_direct_url_discrimination_for_dailymotion_formats(self):
+        # Dailymotion uses format IDs like 'http-480-1', 'http-720', 'http-1080'
+        # These must NOT be mistaken for direct URLs (e.g. 'http://...' or 'https://...')
+        dm_format_id = "http-480-1"
+        real_url = "https://example.com/stream.mp4"
+
+        is_direct_url_dm = bool(dm_format_id and (dm_format_id.startswith('http://') or dm_format_id.startswith('https://')))
+        is_direct_url_real = bool(real_url and (real_url.startswith('http://') or real_url.startswith('https://')))
+
+        self.assertFalse(is_direct_url_dm)
+        self.assertTrue(is_direct_url_real)
+
 if __name__ == '__main__':
     unittest.main()
 

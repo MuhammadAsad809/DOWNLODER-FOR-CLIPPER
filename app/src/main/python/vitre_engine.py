@@ -424,8 +424,9 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
     is_tiktok = any(k in canonical_url.lower() for k in ['tiktok.com', 'musical.ly'])
 
     # 1. Handle Direct Image / Image Post downloads
-    if format_id == 'direct_image' or (format_id and format_id.startswith('http')):
-        direct_target = format_id if format_id.startswith('http') else None
+    is_direct_url = bool(format_id and (format_id.startswith('http://') or format_id.startswith('https://')))
+    if format_id == 'direct_image' or is_direct_url:
+        direct_target = format_id if is_direct_url else None
         if not direct_target:
             try:
                 inspect_opts = {
