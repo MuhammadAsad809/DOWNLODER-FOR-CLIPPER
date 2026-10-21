@@ -23,19 +23,32 @@ def get_engine_version():
     })
 
 def resolve_url(url):
-    """Resolve shortened redirection URLs to their canonical endpoints."""
+    """Resolve shortened redirection URLs to their canonical endpoints and normalize platform URLs."""
+    import re
     clean = url.strip()
     short_domains = [
         'vm.tiktok.com', 'vt.tiktok.com', 'tiktok.com/t/',
-        'youtu.be', 'fb.watch', 't.co', 'vimeo.com'
+        'youtu.be', 'fb.watch', 't.co', 'vimeo.com', 'pin.it',
+        'spotify.link', 'spoti.fi', 'bit.ly'
     ]
     if any(d in clean for d in short_domains):
         try:
             req = urllib.request.Request(clean, headers={'User-Agent': DEFAULT_USER_AGENT})
             with urllib.request.urlopen(req, timeout=8) as resp:
-                return resp.geturl()
+                clean = resp.geturl()
         except Exception:
-            return clean
+            pass
+
+    # Normalize Telegram web preview URLs: t.me/s/<channel>/<id> -> t.me/<channel>/<id>
+    if 't.me/s/' in clean:
+        clean = clean.replace('t.me/s/', 't.me/')
+
+    # Normalize LinkedIn post / update URLs to canonical activity urn
+    if 'linkedin.com' in clean.lower():
+        m = re.search(r'activity[-:](?P<id>\d+)', clean) or re.search(r'ugcPost[-:](?P<id>\d+)', clean)
+        if m:
+            clean = f"https://www.linkedin.com/feed/update/urn:li:activity:{m.group('id')}"
+
     return clean
 
 def check_cancellation(output_path):
@@ -99,6 +112,236 @@ def extract_tiktok_fallback(url):
         pass
     return None
 
+def extract_pinterest_fallback(url):
+    """
+    Fallback extractor for Pinterest pins (handles both video and original full-res image assets).
+    """
+    try:
+        import re
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+
+        videos = list(set(re.findall(r'https://v\.pinimg\.com/(?:videos|hls)/[a-zA-Z0-9/_.-]+(?:\.mp4|\.m3u8)', html)))
+        images = list(set(re.findall(r'https://i\.pinimg\.com/(?:originals|736x)/[a-zA-Z0-9/_.-]+(?:\.png|\.jpg|\.jpeg|\.webp)', html)))
+
+        t_match = re.search(r'<meta property=["\x27]og:title["\x27] content=["\x27]([^"\x27]+)["\x27]', html)
+        title = t_match.group(1) if t_match else "Pinterest Pin"
+
+        if videos:
+            direct_video = videos[0]
+            return {
+                "title": title,
+                "thumbnail": images[0] if images else "",
+                "duration": 0,
+                "uploader": "Pinterest Creator",
+                "extractor": "pinterest_video",
+                "url": url,
+                "direct_url": direct_video,
+                "formats": [{
+                    "format_id": direct_video,
+                    "ext": "mp4",
+                    "resolution": "HD Video",
+                    "height": 720,
+                    "filesize": 0,
+                    "is_video": True,
+                    "is_audio": True,
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "fps": 30.0,
+                    "tbr": 0.0,
+                    "needs_audio": False
+                }]
+            }
+        elif images:
+            orig = [img for img in images if '/originals/' in img]
+            chosen_img = orig[0] if orig else images[0]
+            ext = 'png' if chosen_img.endswith('.png') else 'jpg'
+            return {
+                "title": title,
+                "thumbnail": chosen_img,
+                "duration": 0,
+                "uploader": "Pinterest Creator",
+                "extractor": "pinterest_image",
+                "url": url,
+                "is_image_post": True,
+                "direct_url": chosen_img,
+                "formats": [{
+                    "format_id": chosen_img,
+                    "ext": ext,
+                    "resolution": "Original Pin Image",
+                    "height": 0,
+                    "filesize": 0,
+                    "is_video": False,
+                    "is_audio": False,
+                    "is_image": True,
+                    "vcodec": "none",
+                    "acodec": "none",
+                    "fps": 0,
+                    "tbr": 0,
+                    "needs_audio": False,
+                    "direct_url": chosen_img
+                }]
+            }
+    except Exception:
+        pass
+    return None
+
+def extract_spotify_fallback(url):
+    """
+    SpotDL-style metadata matching: extracts song title, artist, and album cover
+    from open.spotify.com, then queries ytsearch for the exact audio stream.
+    """
+    try:
+        import re
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+
+        def get_meta(prop):
+            p1 = rf'property=["\x27]{prop}["\x27]\s+content=["\x27]([^"\x27]+)["\x27]'
+            p2 = rf'content=["\x27]([^"\x27]+)["\x27]\s+property=["\x27]{prop}["\x27]'
+            m = re.search(p1, html) or re.search(p2, html)
+            return m.group(1) if m else None
+
+        title = get_meta("og:title") or "Spotify Track"
+        desc = get_meta("og:description") or ""
+        artist = desc.split("·")[0].strip() if "·" in desc else desc.strip()
+        thumbnail = get_meta("og:image") or ""
+
+        search_query = f"ytsearch1:{artist} - {title} audio" if artist else f"ytsearch1:{title} audio"
+
+        ydl_opts = {
+            'skip_download': True,
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'bestaudio/best',
+            'http_headers': {'User-Agent': DEFAULT_USER_AGENT}
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            res = ydl.extract_info(search_query, download=False)
+            if not res or not res.get('entries'):
+                return None
+            entry = res['entries'][0]
+
+            formats = []
+            for f in entry.get('formats', []):
+                fid = f.get('format_id')
+                ext = f.get('ext')
+                acodec = str(f.get('acodec') or 'none').lower()
+                vcodec = str(f.get('vcodec') or 'none').lower()
+                if acodec != 'none' and vcodec == 'none':
+                    formats.append({
+                        "format_id": fid,
+                        "ext": ext if ext in ['m4a', 'mp3', 'aac', 'opus', 'webm'] else 'm4a',
+                        "resolution": f"Audio ({ext})",
+                        "height": 0,
+                        "filesize": f.get('filesize') or 0,
+                        "is_video": False,
+                        "is_audio": True,
+                        "vcodec": "none",
+                        "acodec": acodec,
+                        "fps": 0,
+                        "tbr": f.get('tbr') or 0,
+                        "needs_audio": False,
+                        "matched_url": entry.get('webpage_url') or entry.get('url')
+                    })
+
+            if not formats:
+                formats.append({
+                    "format_id": entry.get('format_id') or 'bestaudio',
+                    "ext": 'm4a',
+                    "resolution": "High Quality Audio",
+                    "height": 0,
+                    "filesize": entry.get('filesize') or 0,
+                    "is_video": False,
+                    "is_audio": True,
+                    "vcodec": "none",
+                    "acodec": "aac",
+                    "fps": 0,
+                    "tbr": 0,
+                    "needs_audio": False,
+                    "matched_url": entry.get('webpage_url') or entry.get('url')
+                })
+
+            display_title = f"{artist} - {title}" if (artist and artist not in title) else title
+            return {
+                "title": display_title,
+                "thumbnail": thumbnail or entry.get('thumbnail'),
+                "duration": entry.get('duration') or 0,
+                "uploader": artist or entry.get('uploader') or "Spotify",
+                "extractor": "spotify_match",
+                "url": entry.get('webpage_url') or url,
+                "formats": formats
+            }
+    except Exception:
+        pass
+    return None
+
+def extract_direct_media_fallback(url):
+    """
+    Fallback for Discord CDN, Telegram, and direct media URLs (.mp4, .mp3, .m4a, .webm, etc.)
+    """
+    try:
+        clean = url.split('?')[0].lower()
+        media_exts = ['.mp4', '.mov', '.webm', '.mkv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.opus']
+        is_discord = 'cdn.discordapp.com' in url or 'media.discordapp.net' in url
+        is_direct_ext = any(clean.endswith(ext) for ext in media_exts)
+
+        if not (is_discord or is_direct_ext):
+            return None
+
+        req = urllib.request.Request(url, headers={'User-Agent': DEFAULT_USER_AGENT}, method='HEAD')
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            c_type = resp.headers.get('content-type', '').lower()
+            c_len = int(resp.headers.get('content-length', 0))
+
+            is_video = 'video' in c_type or any(clean.endswith(x) for x in ['.mp4', '.mov', '.webm', '.mkv'])
+            is_audio = 'audio' in c_type or any(clean.endswith(x) for x in ['.mp3', '.m4a', '.wav', '.aac', '.flac', '.opus'])
+
+            if is_video or is_audio:
+                ext = 'mp4' if is_video else 'mp3'
+                for candidate in ['mp4', 'webm', 'mov', 'mkv', 'mp3', 'm4a', 'wav', 'aac', 'flac', 'opus']:
+                    if candidate in c_type or clean.endswith(f'.{candidate}'):
+                        ext = candidate
+                        break
+
+                raw_name = url.split('/')[-1].split('?')[0] or "Media Asset"
+                title = urllib.parse.unquote(raw_name)
+
+                return {
+                    "title": title,
+                    "thumbnail": "",
+                    "duration": 0,
+                    "uploader": "Direct / Discord CDN",
+                    "extractor": "direct_media",
+                    "url": url,
+                    "direct_url": url,
+                    "formats": [{
+                        "format_id": url,
+                        "ext": ext,
+                        "resolution": "Original Media" if is_video else f"Audio ({ext})",
+                        "height": 0,
+                        "filesize": c_len,
+                        "is_video": is_video,
+                        "is_audio": is_audio,
+                        "vcodec": "h264" if is_video else "none",
+                        "acodec": "aac" if is_video else ext,
+                        "fps": 0,
+                        "tbr": 0,
+                        "needs_audio": False
+                    }]
+                }
+    except Exception:
+        pass
+    return None
+
 def download_stream_chunked(direct_url, output_path, callback=None):
     """Download direct media URL chunk-by-chunk with cooperative cancellation check."""
     req = urllib.request.Request(direct_url, headers={'User-Agent': DEFAULT_USER_AGENT})
@@ -140,6 +383,20 @@ def inspect_url(url, cookies_path=None):
 
     canonical_url = resolve_url(url)
     is_tiktok = any(k in canonical_url.lower() for k in ['tiktok.com', 'musical.ly'])
+    is_spotify = any(k in canonical_url.lower() for k in ['spotify.com', 'spotify.link', 'spoti.fi'])
+    is_pinterest = any(k in canonical_url.lower() for k in ['pinterest.com', 'pin.it'])
+
+    # 1. Spotify track: immediately use SpotDL-style metadata matching
+    # (yt-dlp explicitly refuses Spotify audio due to DRM)
+    if is_spotify:
+        spot_res = extract_spotify_fallback(canonical_url)
+        if spot_res:
+            return json.dumps(spot_res)
+
+    # 2. Discord CDN or direct media URLs (.mp4, .mp3, .m4a, etc.)
+    direct_res = extract_direct_media_fallback(canonical_url)
+    if direct_res:
+        return json.dumps(direct_res)
 
     # If it's a TikTok URL, attempt fast reliable fallback if desired or run yt-dlp with fallback
     ydl_opts = {
@@ -171,6 +428,12 @@ def inspect_url(url, cookies_path=None):
         tiktok_res = extract_tiktok_fallback(canonical_url)
         if tiktok_res:
             return json.dumps(tiktok_res)
+
+    # If yt-dlp failed on Pinterest, engage Pinterest fallback extractor
+    if (not info or ytdlp_error) and is_pinterest:
+        pin_res = extract_pinterest_fallback(canonical_url)
+        if pin_res:
+            return json.dumps(pin_res)
 
     # Direct image detection fallback (Pinterest, i.redd.it, Twitter images, Unsplash, direct jpg/png)
     if not info:
@@ -333,7 +596,7 @@ def inspect_url(url, cookies_path=None):
         quality_score = (audio_bonus + codec_bonus + total_bitrate, filesize, fps)
 
         is_social_platform = any(k in canonical_url.lower() for k in [
-            'instagram.com', 'instagr.am', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com', 'fb.watch'
+            'instagram.com', 'instagr.am', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com', 'fb.watch', 'linkedin.com'
         ])
 
         candidate_data = {
@@ -390,7 +653,12 @@ def inspect_url(url, cookies_path=None):
 
     formats.sort(key=format_sort_key)
 
-    # If no formats extracted but it's TikTok, fallback
+    # If no formats extracted but it's Pinterest or TikTok, fallback
+    if not formats and is_pinterest:
+        pin_res = extract_pinterest_fallback(canonical_url)
+        if pin_res:
+            return json.dumps(pin_res)
+
     if not formats and is_tiktok:
         tiktok_res = extract_tiktok_fallback(canonical_url)
         if tiktok_res:
@@ -422,11 +690,17 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
 
     canonical_url = resolve_url(url)
     is_tiktok = any(k in canonical_url.lower() for k in ['tiktok.com', 'musical.ly'])
+    is_pinterest = any(k in canonical_url.lower() for k in ['pinterest.com', 'pin.it'])
+    is_spotify = any(k in canonical_url.lower() for k in ['spotify.com', 'spotify.link', 'spoti.fi'])
 
     # 1. Handle Direct Image / Image Post downloads
     is_direct_url = bool(format_id and (format_id.startswith('http://') or format_id.startswith('https://')))
     if format_id == 'direct_image' or is_direct_url:
         direct_target = format_id if is_direct_url else None
+        if not direct_target and is_pinterest:
+            pin_meta = extract_pinterest_fallback(canonical_url)
+            if pin_meta and pin_meta.get('direct_url'):
+                direct_target = pin_meta['direct_url']
         if not direct_target:
             try:
                 inspect_opts = {
@@ -449,6 +723,13 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
                 "needs_muxing": False,
                 "output_path": output_path
             })
+
+    # 2. Handle Spotify Match audio extraction
+    if is_spotify:
+        spot_meta = extract_spotify_fallback(canonical_url)
+        if spot_meta and spot_meta.get('url'):
+            canonical_url = spot_meta['url']
+            is_audio_only = True
 
     # 2. Handle TikTok Fallback downloads only if explicitly requested
     if format_id == 'hd_no_watermark':
@@ -566,7 +847,7 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         # Social platforms (Instagram, TikTok, Facebook, Twitter) serve progressive MP4s
         # with video and audio already combined on the CDN. They must never be split or muxed.
         is_social_platform = any(k in canonical_url.lower() for k in [
-            'instagram.com', 'instagr.am', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com', 'fb.watch'
+            'instagram.com', 'instagr.am', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com', 'fb.watch', 'linkedin.com'
         ])
 
         # Only attempt separate video + audio download if standalone audio stream actually exists AND not a social progressive platform

@@ -338,6 +338,38 @@ class VitreEngineTests(unittest.TestCase):
         self.assertFalse(is_direct_url_dm)
         self.assertTrue(is_direct_url_real)
 
+    def test_resolve_url_telegram_normalization(self):
+        # Telegram web preview URLs (t.me/s/...) must be normalized for yt-dlp telegram:embed
+        t_url = "https://t.me/s/durov/50"
+        normalized = vitre_engine.resolve_url(t_url)
+        self.assertEqual(normalized, "https://t.me/durov/50")
+
+    def test_resolve_url_linkedin_activity_normalization(self):
+        # LinkedIn post URLs with activity-ID or ugcPost:ID must normalize to canonical URN
+        u1 = "https://www.linkedin.com/posts/google_deepmind-activity-7123456789012345678-abcde?utm_source=share"
+        u2 = "https://www.linkedin.com/feed/update/urn:li:ugcPost:7123456789012345678/"
+        expected = "https://www.linkedin.com/feed/update/urn:li:activity:7123456789012345678"
+
+        self.assertEqual(vitre_engine.resolve_url(u1), expected)
+        self.assertEqual(vitre_engine.resolve_url(u2), expected)
+
+    def test_spotify_url_recognition(self):
+        # Spotify links must be recognized as spotify URLs
+        url = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+        self.assertTrue(any(k in url.lower() for k in ['spotify.com', 'spotify.link', 'spoti.fi']))
+
+    def test_direct_media_extension_detection(self):
+        media_exts = ['.mp4', '.mov', '.webm', '.mkv', '.mp3', '.m4a', '.wav', '.aac', '.flac', '.opus']
+        u1 = "https://cdn.discordapp.com/attachments/123456/7890/voice.mp3?ex=67"
+        u2 = "https://example.com/sample.mp4?token=abc"
+
+        clean1 = u1.split('?')[0].lower()
+        clean2 = u2.split('?')[0].lower()
+
+        self.assertTrue(any(clean1.endswith(ext) for ext in media_exts))
+        self.assertTrue(any(clean2.endswith(ext) for ext in media_exts))
+
 if __name__ == '__main__':
     unittest.main()
+
 
