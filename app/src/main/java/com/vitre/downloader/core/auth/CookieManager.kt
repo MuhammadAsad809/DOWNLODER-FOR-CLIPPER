@@ -99,6 +99,9 @@ class CookieManager(private val context: Context) {
                 host.contains("instagram.com") -> listOf(".instagram.com")
                 host.contains("tiktok.com") -> listOf(".tiktok.com")
                 host.contains("twitter.com") || host.contains("x.com") -> listOf(".x.com", ".twitter.com")
+                host.contains("reddit.com") -> listOf(".reddit.com")
+                host.contains("vimeo.com") -> listOf(".vimeo.com")
+                host.contains("soundcloud.com") -> listOf(".soundcloud.com")
                 host.contains("facebook.com") -> listOf(".facebook.com")
                 host.isNotEmpty() -> {
                     val root = host.removePrefix("www.").removePrefix("m.")
@@ -166,6 +169,41 @@ class CookieManager(private val context: Context) {
     }
 
     /**
+     * Checks if a cookie header contains real authenticated session tokens for a given platform.
+     */
+    fun hasAuthSession(url: String, cookieHeader: String): Boolean {
+        if (cookieHeader.isBlank()) return false
+        val h = url.lowercase()
+        return when {
+            h.contains("youtube.com") || h.contains("google.com") -> {
+                cookieHeader.contains("LOGIN_INFO") ||
+                (cookieHeader.contains("SID=") && cookieHeader.contains("HSID=")) ||
+                cookieHeader.contains("SAPISID=")
+            }
+            h.contains("instagram.com") -> {
+                cookieHeader.contains("sessionid=") || cookieHeader.contains("ds_user_id=")
+            }
+            h.contains("reddit.com") -> {
+                cookieHeader.contains("reddit_session=") || cookieHeader.contains("token_v2=")
+            }
+            h.contains("tiktok.com") -> {
+                cookieHeader.contains("sessionid=") || cookieHeader.contains("sid_guard=")
+            }
+            h.contains("twitter.com") || h.contains("x.com") -> {
+                cookieHeader.contains("auth_token=") || cookieHeader.contains("ct0=")
+            }
+            h.contains("vimeo.com") -> {
+                cookieHeader.contains("vuid=") || cookieHeader.contains("auth")
+            }
+            else -> {
+                cookieHeader.contains("session", ignoreCase = true) ||
+                cookieHeader.contains("auth", ignoreCase = true) ||
+                cookieHeader.contains("token", ignoreCase = true)
+            }
+        }
+    }
+
+    /**
      * Returns human-readable platform names that currently have saved cookies.
      */
     fun getActiveDomains(): List<String> {
@@ -183,7 +221,10 @@ class CookieManager(private val context: Context) {
                             d.contains("google") -> domains.add("Google")
                             d.contains("instagram") -> domains.add("Instagram")
                             d.contains("tiktok") -> domains.add("TikTok")
+                            d.contains("reddit") -> domains.add("Reddit")
                             d.contains("twitter") || d.contains("x.com") -> domains.add("Twitter / X")
+                            d.contains("vimeo") -> domains.add("Vimeo")
+                            d.contains("soundcloud") -> domains.add("SoundCloud")
                             d.contains("facebook") -> domains.add("Facebook")
                             else -> domains.add(d)
                         }

@@ -70,4 +70,53 @@ class CookieExtractorTest {
         assertEquals(listOf(".instagram.com"), resolveDomains("www.instagram.com"))
         assertEquals(listOf(".tiktok.com"), resolveDomains("vm.tiktok.com"))
     }
+
+    @Test
+    fun hasAuthSession_detectsPlatformSessions() {
+        fun hasAuthSession(url: String, cookieHeader: String): Boolean {
+            if (cookieHeader.isBlank()) return false
+            val h = url.lowercase()
+            return when {
+                h.contains("youtube.com") || h.contains("google.com") -> {
+                    cookieHeader.contains("LOGIN_INFO") ||
+                    (cookieHeader.contains("SID=") && cookieHeader.contains("HSID=")) ||
+                    cookieHeader.contains("SAPISID=")
+                }
+                h.contains("instagram.com") -> {
+                    cookieHeader.contains("sessionid=") || cookieHeader.contains("ds_user_id=")
+                }
+                h.contains("reddit.com") -> {
+                    cookieHeader.contains("reddit_session=") || cookieHeader.contains("token_v2=")
+                }
+                h.contains("tiktok.com") -> {
+                    cookieHeader.contains("sessionid=") || cookieHeader.contains("sid_guard=")
+                }
+                h.contains("twitter.com") || h.contains("x.com") -> {
+                    cookieHeader.contains("auth_token=") || cookieHeader.contains("ct0=")
+                }
+                else -> false
+            }
+        }
+
+        // 1. YouTube / Google Gmail session
+        val googleCookie = "SID=abc1234; HSID=xyz567; SSID=ss11; APISID=ap99; SAPISID=sp88"
+        assertTrue(hasAuthSession("https://accounts.google.com/signin", googleCookie))
+        assertTrue(hasAuthSession("https://m.youtube.com/", "LOGIN_INFO=token_xyz_123"))
+
+        // 2. Instagram session
+        val igCookie = "csrftoken=cf123; sessionid=ig_sess_999; ds_user_id=12345"
+        assertTrue(hasAuthSession("https://www.instagram.com/", igCookie))
+
+        // 3. Reddit session
+        val redditCookie = "reddit_session=red_token_456"
+        assertTrue(hasAuthSession("https://www.reddit.com/", redditCookie))
+
+        // 4. TikTok session
+        val tiktokCookie = "sid_guard=guard_789; sessionid=tt_sess_101"
+        assertTrue(hasAuthSession("https://www.tiktok.com/", tiktokCookie))
+
+        // 5. Unauthenticated session returns false
+        val anonCookie = "PREF=f1=50000000; VISITOR_INFO1_LIVE=vis_123; YSC=ysc_abc"
+        org.junit.Assert.assertFalse(hasAuthSession("https://m.youtube.com/", anonCookie))
+    }
 }

@@ -217,16 +217,19 @@ fun CookieAuthScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // 1. YouTube In-App Login
+            // 1. YouTube & Google Account (Gmail) One-Tap Login
             item {
                 PlatformAuthCard(
-                    title = "Sign In to YouTube",
-                    subtitle = "Opens mobile YouTube inside Vitre — stays in app, captures session cookies",
+                    title = "Sign In with Google / YouTube",
+                    subtitle = "Sign in with your Gmail account — automatically captures authenticated session cookies",
                     iconRes = R.drawable.ic_3d_youtube,
                     accentColor = Color(0xFFFF0033),
-                    badgeText = "In-App",
+                    badgeText = "Auto-Extract",
                     onClick = {
-                        activeWebTarget = Pair("YouTube In-App Login", "https://m.youtube.com/")
+                        activeWebTarget = Pair(
+                            "Google & YouTube Sign-In",
+                            "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fm.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue"
+                        )
                     }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -236,10 +239,10 @@ fun CookieAuthScreen(
             item {
                 PlatformAuthCard(
                     title = "Sign In to Instagram",
-                    subtitle = "Opens Instagram web login inside Vitre — extracts full session",
+                    subtitle = "Opens Instagram web login — automatically extracts sessionid and CSRF tokens",
                     iconRes = R.drawable.ic_3d_instagram,
                     accentColor = Color(0xFFE1306C),
-                    badgeText = "In-App",
+                    badgeText = "Auto-Extract",
                     onClick = {
                         activeWebTarget = Pair("Instagram In-App Login", "https://www.instagram.com/accounts/login/")
                     }
@@ -247,16 +250,46 @@ fun CookieAuthScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // 3. TikTok / Other Sites
+            // 3. Reddit In-App Login
             item {
                 PlatformAuthCard(
-                    title = "Sign In to TikTok / Other",
-                    subtitle = "Extract cookies for TikTok, X / Twitter, or other sites",
-                    iconVector = Icons.Default.Language,
-                    accentColor = Color(0xFF00D2FF),
-                    badgeText = "In-App",
+                    title = "Sign In to Reddit",
+                    subtitle = "Opens Reddit login — automatically captures reddit_session for restricted posts",
+                    iconRes = R.drawable.ic_3d_reddit,
+                    accentColor = Color(0xFFFF4500),
+                    badgeText = "Auto-Extract",
                     onClick = {
-                        activeWebTarget = Pair("TikTok In-App Login", "https://m.tiktok.com/")
+                        activeWebTarget = Pair("Reddit In-App Login", "https://www.reddit.com/login/")
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // 4. TikTok In-App Login
+            item {
+                PlatformAuthCard(
+                    title = "Sign In to TikTok",
+                    subtitle = "Opens TikTok web login — automatically extracts session cookies",
+                    iconRes = R.drawable.ic_3d_tiktok,
+                    accentColor = Color(0xFF00D2FF),
+                    badgeText = "Auto-Extract",
+                    onClick = {
+                        activeWebTarget = Pair("TikTok In-App Login", "https://www.tiktok.com/login/")
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // 5. X / Twitter In-App Login
+            item {
+                PlatformAuthCard(
+                    title = "Sign In to Twitter / X",
+                    subtitle = "Opens X login — automatically captures auth_token and ct0 session tokens",
+                    iconRes = R.drawable.ic_3d_x,
+                    accentColor = Color(0xFF1DA1F2),
+                    badgeText = "Auto-Extract",
+                    onClick = {
+                        activeWebTarget = Pair("Twitter / X In-App Login", "https://x.com/i/flow/login")
                     }
                 )
                 Spacer(modifier = Modifier.height(24.dp))
@@ -511,12 +544,65 @@ fun InAppBrowserOverlay(
     var detectedCookiesCount by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var pageError by remember { mutableStateOf<String?>(null) }
+    var isAutoCaptured by remember { mutableStateOf(false) }
 
-    val isYouTube = remember { initialUrl.contains("youtube.com") }
-    val isInstagram = remember { initialUrl.contains("instagram.com") }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val cookieManager = remember { CookieManager(context) }
 
-    val userAgent = remember {
-        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+    val isGoogleOrYouTube = remember(initialUrl) {
+        initialUrl.contains("youtube.com") || initialUrl.contains("google.com")
+    }
+
+    // High-compatibility desktop Chrome user agent prevents Google's '403: disallowed_useragent'
+    // block when users sign in with their Gmail accounts on accounts.google.com.
+    val desktopUserAgent = remember {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+    val mobileUserAgent = remember {
+        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    }
+
+    fun collectAllCookies(activeUrl: String, cm: AndroidCookieManager): String {
+        cm.flush()
+        val primaryCookies = cm.getCookie(activeUrl) ?: ""
+        return buildString {
+            append(primaryCookies)
+            if (isGoogleOrYouTube || activeUrl.contains("google.com") || activeUrl.contains("youtube.com")) {
+                val c1 = cm.getCookie("https://www.youtube.com/") ?: ""
+                val c2 = cm.getCookie("https://m.youtube.com/") ?: ""
+                val c3 = cm.getCookie("https://accounts.google.com/") ?: ""
+                val c4 = cm.getCookie("https://www.google.com/") ?: ""
+                if (c1.isNotBlank() && !contains(c1)) append("; ").append(c1)
+                if (c2.isNotBlank() && !contains(c2)) append("; ").append(c2)
+                if (c3.isNotBlank() && !contains(c3)) append("; ").append(c3)
+                if (c4.isNotBlank() && !contains(c4)) append("; ").append(c4)
+            } else if (activeUrl.contains("instagram.com")) {
+                val c1 = cm.getCookie("https://www.instagram.com/") ?: ""
+                val c2 = cm.getCookie("https://i.instagram.com/") ?: ""
+                if (c1.isNotBlank() && !contains(c1)) append("; ").append(c1)
+                if (c2.isNotBlank() && !contains(c2)) append("; ").append(c2)
+            } else if (activeUrl.contains("reddit.com")) {
+                val c1 = cm.getCookie("https://www.reddit.com/") ?: ""
+                if (c1.isNotBlank() && !contains(c1)) append("; ").append(c1)
+            }
+        }
+    }
+
+    fun checkAndAutoExtract(activeUrl: String, cm: AndroidCookieManager) {
+        if (isAutoCaptured) return
+        val allCookies = collectAllCookies(activeUrl, cm)
+        val count = if (allCookies.isBlank()) 0 else allCookies.split(";").count { c -> c.trim().contains("=") }
+        detectedCookiesCount = count
+
+        val hasAuth = cookieManager.hasAuthSession(activeUrl, allCookies)
+        if (hasAuth && !isAutoCaptured) {
+            isAutoCaptured = true
+            scope.launch {
+                kotlinx.coroutines.delay(1000)
+                onCookiesExtracted(activeUrl, allCookies)
+            }
+        }
     }
 
     Box(
@@ -576,36 +662,54 @@ fun InAppBrowserOverlay(
                         Button(
                             onClick = {
                                 val cm = AndroidCookieManager.getInstance()
-                                val primaryCookies = cm.getCookie(currentUrl) ?: ""
-                                val allCookies = buildString {
-                                    append(primaryCookies)
-                                    if (isYouTube) {
-                                        val c1 = cm.getCookie("https://www.youtube.com/") ?: ""
-                                        val c2 = cm.getCookie("https://accounts.google.com/") ?: ""
-                                        if (c1.isNotBlank() && c1 != primaryCookies) append("; ").append(c1)
-                                        if (c2.isNotBlank() && c2 != primaryCookies) append("; ").append(c2)
-                                    } else if (isInstagram) {
-                                        val c1 = cm.getCookie("https://www.instagram.com/") ?: ""
-                                        val c2 = cm.getCookie("https://i.instagram.com/") ?: ""
-                                        if (c1.isNotBlank() && c1 != primaryCookies) append("; ").append(c1)
-                                        if (c2.isNotBlank() && c2 != primaryCookies) append("; ").append(c2)
-                                    }
-                                }
+                                val allCookies = collectAllCookies(currentUrl, cm)
                                 onCookiesExtracted(currentUrl, allCookies)
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF00D2FF),
+                                containerColor = if (isAutoCaptured) Color(0xFF00E676) else Color(0xFF00D2FF),
                                 contentColor = Color.Black
                             ),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(
+                                if (isAutoCaptured) Icons.Default.CheckCircle else Icons.Default.Save,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (detectedCookiesCount > 0) "Save ($detectedCookiesCount)" else "Save Cookies",
+                                text = if (isAutoCaptured) "Captured!" else if (detectedCookiesCount > 0) "Save ($detectedCookiesCount)" else "Save",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Real-time Automatic Extraction Banner
+            AnimatedVisibility(visible = isAutoCaptured) {
+                Surface(
+                    color = Color(0xFF00E676),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Authenticated! Session Captured Automatically",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.Black
+                            )
+                            Text(
+                                text = "Real Netscape cookies formatted and saved. Returning to Vitre...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF003816)
                             )
                         }
                     }
@@ -661,7 +765,8 @@ fun InAppBrowserOverlay(
                                 useWideViewPort = true
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 cacheMode = WebSettings.LOAD_DEFAULT
-                                userAgentString = userAgent
+                                // Use Desktop Chrome User Agent for Google accounts to bypass 403 disallowed_useragent
+                                userAgentString = if (isGoogleOrYouTube) desktopUserAgent else mobileUserAgent
                                 javaScriptCanOpenWindowsAutomatically = true
                                 setSupportMultipleWindows(false)
                             }
@@ -682,7 +787,14 @@ fun InAppBrowserOverlay(
                                     super.onPageStarted(view, url, favicon)
                                     isLoading = true
                                     pageError = null
-                                    url?.let { currentUrl = it }
+                                    url?.let {
+                                        currentUrl = it
+                                        // Ensure desktop user agent is set for all Google/Accounts redirection hops
+                                        if (it.contains("google.com") || it.contains("youtube.com")) {
+                                            settings.userAgentString = desktopUserAgent
+                                        }
+                                        checkAndAutoExtract(it, cookieMgr)
+                                    }
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -690,9 +802,15 @@ fun InAppBrowserOverlay(
                                     isLoading = false
                                     url?.let {
                                         currentUrl = it
-                                        val header = cookieMgr.getCookie(it) ?: ""
-                                        val count = if (header.isBlank()) 0 else header.split(";").count { c -> c.trim().contains("=") }
-                                        detectedCookiesCount = count
+                                        checkAndAutoExtract(it, cookieMgr)
+                                    }
+                                }
+
+                                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                    super.doUpdateVisitedHistory(view, url, isReload)
+                                    url?.let {
+                                        currentUrl = it
+                                        checkAndAutoExtract(it, cookieMgr)
                                     }
                                 }
 
