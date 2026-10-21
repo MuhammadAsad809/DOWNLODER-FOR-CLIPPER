@@ -105,7 +105,7 @@ class CookieExtractorTest {
                 u.contains("x.com") || u.contains("twitter.com") -> {
                     cookieHeader.contains("auth_token=")
                 }
-                else -> false
+                else -> !isStillOnLoginPage && cookieHeader.length > 20
             }
         }
 
@@ -115,6 +115,7 @@ class CookieExtractorTest {
         org.junit.Assert.assertFalse(hasAuthSession("https://www.instagram.com/accounts/login/", "csrftoken=cf123"))
         org.junit.Assert.assertFalse(hasAuthSession("https://x.com/i/flow/login", "ct0=guest_ct0"))
         org.junit.Assert.assertFalse(hasAuthSession("https://x.com/i/jf/onboarding", "ct0=guest_ct0; guest_id=gid123"))
+        org.junit.Assert.assertFalse(hasAuthSession("https://bilibili.com/login", "buvid3=12345; DedeUserID=abcde"))
 
         // 2. Successful redirect to YouTube after Google/Gmail sign in
         assertTrue(hasAuthSession("https://m.youtube.com/", "LOGIN_INFO=token_xyz_123; SID=sid123; HSID=h123"))
@@ -127,5 +128,8 @@ class CookieExtractorTest {
 
         // 5. Successful redirect to X / Twitter home
         assertTrue(hasAuthSession("https://x.com/home", "auth_token=real_auth_token_789; ct0=ct123"))
+
+        // 6. Generic custom site after login
+        assertTrue(hasAuthSession("https://bilibili.com/", "buvid3=12345; DedeUserID=abcde; SESSDATA=session123"))
     }
 }

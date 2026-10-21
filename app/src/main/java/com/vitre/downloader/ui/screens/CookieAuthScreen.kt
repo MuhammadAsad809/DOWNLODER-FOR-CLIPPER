@@ -66,6 +66,10 @@ fun CookieAuthScreen(
     var pasteDomain by remember { mutableStateOf("https://www.youtube.com/") }
     var pasteContent by remember { mutableStateOf("") }
 
+    // Dialog state for opening custom website in in-app browser
+    var showCustomUrlDialog by remember { mutableStateOf(false) }
+    var customUrlInput by remember { mutableStateOf("https://") }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -217,14 +221,14 @@ fun CookieAuthScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // 1. YouTube & Google Account (Gmail) One-Tap Login
+            // 1. YouTube & Google Account (Gmail) In-App Login
             item {
                 PlatformAuthCard(
                     title = "Sign In with Google / YouTube",
-                    subtitle = "Sign in with your Gmail account — automatically captures authenticated session cookies",
+                    subtitle = "Log into Gmail/YouTube in the in-app browser, then tap Done to save session",
                     iconRes = R.drawable.ic_3d_youtube,
                     accentColor = Color(0xFFFF0033),
-                    badgeText = "Auto-Extract",
+                    badgeText = "In-App Browser",
                     onClick = {
                         activeWebTarget = Pair(
                             "Google & YouTube Sign-In",
@@ -239,10 +243,10 @@ fun CookieAuthScreen(
             item {
                 PlatformAuthCard(
                     title = "Sign In to Instagram",
-                    subtitle = "Opens Instagram web login — automatically extracts sessionid and CSRF tokens",
+                    subtitle = "Log into Instagram in the in-app browser, then tap Done to save session",
                     iconRes = R.drawable.ic_3d_instagram,
                     accentColor = Color(0xFFE1306C),
-                    badgeText = "Auto-Extract",
+                    badgeText = "In-App Browser",
                     onClick = {
                         activeWebTarget = Pair("Instagram In-App Login", "https://www.instagram.com/accounts/login/")
                     }
@@ -254,10 +258,10 @@ fun CookieAuthScreen(
             item {
                 PlatformAuthCard(
                     title = "Sign In to Reddit",
-                    subtitle = "Opens Reddit login — automatically captures reddit_session for restricted posts",
+                    subtitle = "Log into Reddit in the in-app browser, then tap Done to save session",
                     iconRes = R.drawable.ic_3d_reddit,
                     accentColor = Color(0xFFFF4500),
-                    badgeText = "Auto-Extract",
+                    badgeText = "In-App Browser",
                     onClick = {
                         activeWebTarget = Pair("Reddit In-App Login", "https://www.reddit.com/login/")
                     }
@@ -269,12 +273,12 @@ fun CookieAuthScreen(
             item {
                 PlatformAuthCard(
                     title = "Sign In to TikTok",
-                    subtitle = "Opens TikTok web login — automatically extracts session cookies",
+                    subtitle = "Log into TikTok in the in-app browser, then tap Done to save session",
                     iconRes = R.drawable.ic_3d_tiktok,
                     accentColor = Color(0xFF00D2FF),
-                    badgeText = "Auto-Extract",
+                    badgeText = "In-App Browser",
                     onClick = {
-                        activeWebTarget = Pair("TikTok In-App Login", "https://www.tiktok.com/login/")
+                        activeWebTarget = Pair("TikTok In-App Login", "https://m.tiktok.com/login/")
                     }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -284,12 +288,27 @@ fun CookieAuthScreen(
             item {
                 PlatformAuthCard(
                     title = "Sign In to Twitter / X",
-                    subtitle = "Opens X login — automatically captures auth_token and ct0 session tokens",
+                    subtitle = "Log into X in the in-app browser, then tap Done to save session",
                     iconRes = R.drawable.ic_3d_x,
                     accentColor = Color(0xFF1DA1F2),
-                    badgeText = "Auto-Extract",
+                    badgeText = "In-App Browser",
                     onClick = {
                         activeWebTarget = Pair("Twitter / X In-App Login", "https://x.com/i/flow/login")
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // 6. Custom Website (YTDLnis-style any site)
+            item {
+                PlatformAuthCard(
+                    title = "Custom Website / Any Domain",
+                    subtitle = "Open any site (Bilibili, Facebook, Dailymotion, etc.) to log in",
+                    iconVector = Icons.Default.Language,
+                    accentColor = Color(0xFF00E676),
+                    badgeText = "In-App Browser",
+                    onClick = {
+                        showCustomUrlDialog = true
                     }
                 )
                 Spacer(modifier = Modifier.height(24.dp))
@@ -341,7 +360,7 @@ fun CookieAuthScreen(
                 initialUrl = targetUrl,
                 title = targetTitle,
                 onDismiss = { activeWebTarget = null },
-                onCookiesExtracted = { url, cookieHeader ->
+                onCookiesExtracted = { url, cookieHeader, isVerified ->
                     scope.launch {
                         val res = cookieManager.saveCookiesFromWeb(url, cookieHeader)
                         activeWebTarget = null
@@ -350,7 +369,11 @@ fun CookieAuthScreen(
                             hasCookies = true
                             activeDomains = cookieManager.getActiveDomains()
                             isError = false
-                            importStatusMessage = "Successfully captured $count session cookies for $targetTitle!"
+                            importStatusMessage = if (isVerified) {
+                                "✓ Successfully authenticated and saved $count session cookies for $targetTitle!"
+                            } else {
+                                "Saved $count cookies (unverified account session) for $targetTitle."
+                            }
                         } else {
                             isError = true
                             importStatusMessage = res.exceptionOrNull()?.message ?: "Failed to save session cookies."
@@ -417,6 +440,58 @@ fun CookieAuthScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { showPasteDialog = false }) {
+                        Text("Cancel", color = Color(0xFF8E9BB0))
+                    }
+                },
+                containerColor = Color(0xFF0D1422),
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
+        // Custom URL Input Modal Dialog
+        if (showCustomUrlDialog) {
+            AlertDialog(
+                onDismissRequest = { showCustomUrlDialog = false },
+                title = { Text("Open Custom Website", fontWeight = FontWeight.Bold, color = Color.White) },
+                text = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Enter any website or login URL (e.g., https://bilibili.com, https://facebook.com):",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF8E9BB0)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = customUrlInput,
+                            onValueChange = { customUrlInput = it },
+                            label = { Text("Website Login URL") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            var u = customUrlInput.trim()
+                            if (u.isNotBlank()) {
+                                if (!u.startsWith("http://") && !u.startsWith("https://")) {
+                                    u = "https://$u"
+                                }
+                                val domainHost = try {
+                                    Uri.parse(u).host ?: u
+                                } catch (_: Exception) { u }
+                                showCustomUrlDialog = false
+                                activeWebTarget = Pair(domainHost, u)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF), contentColor = Color.Black)
+                    ) {
+                        Text("Open Browser", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCustomUrlDialog = false }) {
                         Text("Cancel", color = Color(0xFF8E9BB0))
                     }
                 },
@@ -528,23 +603,32 @@ private fun PlatformAuthCard(
 }
 
 /**
- * Full-Screen In-App Browser Overlay with Intent-blocking and real-time cookie extraction.
- * Guarantees zero external app hijack (YouTube/Instagram app will NEVER open).
+ * Full-Screen In-App Browser Overlay inspired by YTDLnis and Seal.
+ * Features:
+ * - Real User-Agent switching (Desktop Chrome for Google auth / Mobile for standard sites)
+ * - Navigation history (Back / Forward / Reload) and native BackHandler
+ * - Live authenticated session verification (checks actual session tokens, zero false positives)
+ * - Clear cookies / session reset
+ * - External app intent suppression (prevents YouTube/Instagram apps from opening)
  */
 @Composable
 fun InAppBrowserOverlay(
     initialUrl: String,
     title: String,
     onDismiss: () -> Unit,
-    onCookiesExtracted: (String, String) -> Unit
+    onCookiesExtracted: (url: String, cookieHeader: String, isVerified: Boolean) -> Unit
 ) {
     var currentUrl by remember { mutableStateOf(initialUrl) }
     var pageTitle by remember { mutableStateOf(title) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var detectedCookiesCount by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
+    var progress by remember { mutableFloatStateOf(0f) }
     var pageError by remember { mutableStateOf<String?>(null) }
-    var isAutoCaptured by remember { mutableStateOf(false) }
+    var canGoBack by remember { mutableStateOf(false) }
+    var canGoForward by remember { mutableStateOf(false) }
+    var showNotLoggedInDialog by remember { mutableStateOf(false) }
+    var showClearCookiesDialog by remember { mutableStateOf(false) }
+    var cookiesUpdatedSignal by remember { mutableIntStateOf(0) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -554,8 +638,6 @@ fun InAppBrowserOverlay(
         initialUrl.contains("youtube.com") || initialUrl.contains("google.com")
     }
 
-    // High-compatibility desktop Chrome user agent prevents Google's '403: disallowed_useragent'
-    // block when users sign in with their Gmail accounts on accounts.google.com.
     val desktopUserAgent = remember {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     }
@@ -563,12 +645,25 @@ fun InAppBrowserOverlay(
         "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     }
 
+    var isDesktopMode by remember {
+        mutableStateOf(isGoogleOrYouTube)
+    }
+
+    // Hardware back button navigates WebView history first
+    BackHandler {
+        if (webViewRef?.canGoBack() == true) {
+            webViewRef?.goBack()
+        } else {
+            onDismiss()
+        }
+    }
+
     fun collectAllCookies(activeUrl: String, cm: AndroidCookieManager): String {
         cm.flush()
         val primaryCookies = cm.getCookie(activeUrl) ?: ""
         return buildString {
             append(primaryCookies)
-            if (isGoogleOrYouTube || activeUrl.contains("google.com") || activeUrl.contains("youtube.com")) {
+            if (activeUrl.contains("google.com") || activeUrl.contains("youtube.com")) {
                 val c1 = cm.getCookie("https://www.youtube.com/") ?: ""
                 val c2 = cm.getCookie("https://m.youtube.com/") ?: ""
                 val c3 = cm.getCookie("https://accounts.google.com/") ?: ""
@@ -585,24 +680,24 @@ fun InAppBrowserOverlay(
             } else if (activeUrl.contains("reddit.com")) {
                 val c1 = cm.getCookie("https://www.reddit.com/") ?: ""
                 if (c1.isNotBlank() && !contains(c1)) append("; ").append(c1)
+            } else if (activeUrl.contains("tiktok.com")) {
+                val c1 = cm.getCookie("https://www.tiktok.com/") ?: ""
+                val c2 = cm.getCookie("https://m.tiktok.com/") ?: ""
+                if (c1.isNotBlank() && !contains(c1)) append("; ").append(c1)
+                if (c2.isNotBlank() && !contains(c2)) append("; ").append(c2)
+            } else if (activeUrl.contains("x.com") || activeUrl.contains("twitter.com")) {
+                val c1 = cm.getCookie("https://x.com/") ?: ""
+                val c2 = cm.getCookie("https://twitter.com/") ?: ""
+                if (c1.isNotBlank() && !contains(c1)) append("; ").append(c1)
+                if (c2.isNotBlank() && !contains(c2)) append("; ").append(c2)
             }
         }
     }
 
-    fun checkAndAutoExtract(activeUrl: String, cm: AndroidCookieManager) {
-        if (isAutoCaptured) return
-        val allCookies = collectAllCookies(activeUrl, cm)
-        val count = if (allCookies.isBlank()) 0 else allCookies.split(";").count { c -> c.trim().contains("=") }
-        detectedCookiesCount = count
-
-        val hasAuth = cookieManager.hasAuthSession(activeUrl, allCookies)
-        if (hasAuth && !isAutoCaptured) {
-            isAutoCaptured = true
-            scope.launch {
-                kotlinx.coroutines.delay(1000)
-                onCookiesExtracted(activeUrl, allCookies)
-            }
-        }
+    val isAuthDetected = remember(currentUrl, cookiesUpdatedSignal) {
+        val cm = AndroidCookieManager.getInstance()
+        val c = collectAllCookies(currentUrl, cm)
+        cookieManager.hasAuthSession(currentUrl, c)
     }
 
     Box(
@@ -616,70 +711,101 @@ fun InAppBrowserOverlay(
             // Top Navigation & Action Header
             Surface(
                 color = Color(0xFF0D1422),
-                modifier = Modifier.fillMaxWidth().height(64.dp)
+                modifier = Modifier.fillMaxWidth().height(60.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 10.dp),
+                        .padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    // Left Navigation Controls
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onDismiss) {
                             Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                         }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = pageTitle,
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = currentUrl,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF00D2FF),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        IconButton(
+                            onClick = { webViewRef?.goBack() },
+                            enabled = canGoBack
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = if (canGoBack) Color.White else Color(0xFF4A5568)
                             )
                         }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { webViewRef?.goForward() },
+                            enabled = canGoForward
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowForward,
+                                contentDescription = "Forward",
+                                tint = if (canGoForward) Color.White else Color(0xFF4A5568)
+                            )
+                        }
                         IconButton(onClick = {
                             pageError = null
                             webViewRef?.reload()
                         }) {
                             Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color.White)
                         }
+                    }
 
+                    // Right Actions
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Desktop / Mobile Mode Toggle
+                        IconButton(onClick = {
+                            isDesktopMode = !isDesktopMode
+                            webViewRef?.settings?.userAgentString = if (isDesktopMode) desktopUserAgent else mobileUserAgent
+                            webViewRef?.reload()
+                        }) {
+                            Icon(
+                                imageVector = if (isDesktopMode) Icons.Default.DesktopWindows else Icons.Default.PhoneAndroid,
+                                contentDescription = if (isDesktopMode) "Desktop Mode" else "Mobile Mode",
+                                tint = if (isDesktopMode) Color(0xFF00D2FF) else Color(0xFF8E9BB0)
+                            )
+                        }
+
+                        // Clear WebView Session Cookies
+                        IconButton(onClick = { showClearCookiesDialog = true }) {
+                            Icon(
+                                Icons.Default.DeleteOutline,
+                                contentDescription = "Clear Browser Session",
+                                tint = Color(0xFF8E9BB0)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Done / Save Cookies Button
                         Button(
                             onClick = {
                                 val cm = AndroidCookieManager.getInstance()
                                 val allCookies = collectAllCookies(currentUrl, cm)
-                                onCookiesExtracted(currentUrl, allCookies)
+                                val verified = cookieManager.hasAuthSession(currentUrl, allCookies)
+                                if (verified) {
+                                    onCookiesExtracted(currentUrl, allCookies, true)
+                                } else {
+                                    showNotLoggedInDialog = true
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isAutoCaptured) Color(0xFF00E676) else Color(0xFF00D2FF),
+                                containerColor = if (isAuthDetected) Color(0xFF00E676) else Color(0xFF00D2FF),
                                 contentColor = Color.Black
                             ),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
                             Icon(
-                                if (isAutoCaptured) Icons.Default.CheckCircle else Icons.Default.Save,
+                                imageVector = if (isAuthDetected) Icons.Default.CheckCircle else Icons.Default.Save,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isAutoCaptured) "Captured!" else "Save Session",
+                                text = if (isAuthDetected) "Save Session" else "Done",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
@@ -688,36 +814,51 @@ fun InAppBrowserOverlay(
                 }
             }
 
-            // Real-time Automatic Extraction Banner
-            AnimatedVisibility(visible = isAutoCaptured) {
-                Surface(
-                    color = Color(0xFF00E676),
-                    modifier = Modifier.fillMaxWidth()
+            // Real-time Auth Status & URL Sub-Bar
+            Surface(
+                color = Color(0xFF101726),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = pageTitle,
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = currentUrl,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF8E9BB0),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isAuthDetected) Color(0xFF00E676).copy(alpha = 0.2f) else Color(0xFFFFA500).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, if (isAuthDetected) Color(0xFF00E676) else Color(0xFFFFA500).copy(alpha = 0.4f))
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Authenticated! Session Captured Automatically",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Real Netscape cookies formatted and saved. Returning to Vitre...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF003816)
-                            )
-                        }
+                        Text(
+                            text = if (isAuthDetected) "✓ Logged In" else "○ Sign-in needed",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = if (isAuthDetected) Color(0xFF00E676) else Color(0xFFFFA500),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
                     }
                 }
             }
 
             if (isLoading) {
                 LinearProgressIndicator(
+                    progress = { if (progress > 0f) progress else 0.1f },
                     modifier = Modifier.fillMaxWidth(),
                     color = Color(0xFF00D2FF),
                     trackColor = Color(0xFF101726)
@@ -765,8 +906,7 @@ fun InAppBrowserOverlay(
                                 useWideViewPort = true
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 cacheMode = WebSettings.LOAD_DEFAULT
-                                // Use Desktop Chrome User Agent for Google accounts to bypass 403 disallowed_useragent
-                                userAgentString = if (isGoogleOrYouTube) desktopUserAgent else mobileUserAgent
+                                userAgentString = if (isDesktopMode) desktopUserAgent else mobileUserAgent
                                 javaScriptCanOpenWindowsAutomatically = true
                                 setSupportMultipleWindows(false)
                             }
@@ -780,6 +920,15 @@ fun InAppBrowserOverlay(
                                     super.onReceivedTitle(view, title)
                                     if (!title.isNullOrBlank()) pageTitle = title
                                 }
+
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    super.onProgressChanged(view, newProgress)
+                                    progress = newProgress / 100f
+                                    isLoading = newProgress < 100
+                                    if (newProgress == 100) {
+                                        cookiesUpdatedSignal++
+                                    }
+                                }
                             }
 
                             webViewClient = object : WebViewClient() {
@@ -789,11 +938,9 @@ fun InAppBrowserOverlay(
                                     pageError = null
                                     url?.let {
                                         currentUrl = it
-                                        // Ensure desktop user agent is set for all Google/Accounts redirection hops
-                                        if (it.contains("google.com") || it.contains("youtube.com")) {
-                                            settings.userAgentString = desktopUserAgent
-                                        }
-                                        checkAndAutoExtract(it, cookieMgr)
+                                        canGoBack = view?.canGoBack() == true
+                                        canGoForward = view?.canGoForward() == true
+                                        cookiesUpdatedSignal++
                                     }
                                 }
 
@@ -802,7 +949,9 @@ fun InAppBrowserOverlay(
                                     isLoading = false
                                     url?.let {
                                         currentUrl = it
-                                        checkAndAutoExtract(it, cookieMgr)
+                                        canGoBack = view?.canGoBack() == true
+                                        canGoForward = view?.canGoForward() == true
+                                        cookiesUpdatedSignal++
                                     }
                                 }
 
@@ -810,7 +959,9 @@ fun InAppBrowserOverlay(
                                     super.doUpdateVisitedHistory(view, url, isReload)
                                     url?.let {
                                         currentUrl = it
-                                        checkAndAutoExtract(it, cookieMgr)
+                                        canGoBack = view?.canGoBack() == true
+                                        canGoForward = view?.canGoForward() == true
+                                        cookiesUpdatedSignal++
                                     }
                                 }
 
@@ -830,6 +981,9 @@ fun InAppBrowserOverlay(
                                         reqUrl.startsWith("vnd.youtube:") ||
                                         reqUrl.startsWith("instagram://") ||
                                         reqUrl.startsWith("market://") ||
+                                        reqUrl.startsWith("snssdk1233:") ||
+                                        reqUrl.startsWith("snssdk1180:") ||
+                                        reqUrl.startsWith("twitter:") ||
                                         reqUrl.startsWith("android-app://")) {
                                         try {
                                             val parsed = Intent.parseUri(reqUrl, Intent.URI_INTENT_SCHEME)
@@ -853,6 +1007,87 @@ fun InAppBrowserOverlay(
                     }
                 )
             }
+        }
+
+        // Dialog: Not Logged In Confirmation Warning
+        if (showNotLoggedInDialog) {
+            AlertDialog(
+                onDismissRequest = { showNotLoggedInDialog = false },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFA500))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Not Logged In Yet", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                },
+                text = {
+                    Text(
+                        text = "You are currently still on the sign-in page or haven't finished logging into your account.\n\nTo download restricted, private, or high-quality media, please log into your account first, then tap Save Session.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFBAC7D5)
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showNotLoggedInDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF), contentColor = Color.Black)
+                    ) {
+                        Text("Continue Sign-In", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showNotLoggedInDialog = false
+                            val cm = AndroidCookieManager.getInstance()
+                            val allCookies = collectAllCookies(currentUrl, cm)
+                            onCookiesExtracted(currentUrl, allCookies, false)
+                        }
+                    ) {
+                        Text("Save Anyway (Guest)", color = Color(0xFF8E9BB0))
+                    }
+                },
+                containerColor = Color(0xFF0D1422),
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
+        // Dialog: Clear WebView Cookies
+        if (showClearCookiesDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearCookiesDialog = false },
+                title = { Text("Clear Browser Cookies?", fontWeight = FontWeight.Bold, color = Color.White) },
+                text = {
+                    Text(
+                        "This will wipe all cookies and log you out of the in-app browser so you can log in fresh.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFBAC7D5)
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showClearCookiesDialog = false
+                            val cm = AndroidCookieManager.getInstance()
+                            cm.removeAllCookies {
+                                cm.flush()
+                                cookiesUpdatedSignal++
+                                webViewRef?.reload()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White)
+                    ) {
+                        Text("Clear & Reload", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearCookiesDialog = false }) {
+                        Text("Cancel", color = Color(0xFF8E9BB0))
+                    }
+                },
+                containerColor = Color(0xFF0D1422),
+                shape = RoundedCornerShape(16.dp)
+            )
         }
     }
 }

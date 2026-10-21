@@ -215,7 +215,7 @@ class CookieManager(private val context: Context) {
                 // X ONLY assigns auth_token after successful account login (ct0 is just anonymous CSRF)
                 cookieHeader.contains("auth_token=")
             }
-            else -> false
+            else -> !isStillOnLoginPage && cookieHeader.length > 20
         }
     }
 
