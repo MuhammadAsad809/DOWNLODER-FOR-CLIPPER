@@ -169,39 +169,56 @@ class CookieManager(private val context: Context) {
     }
 
     /**
-     * Checks if a cookie header contains real authenticated session tokens for a given platform.
+     * Checks if a user has ACTUALLY completed login on the target platform.
+     * Guarantees:
+     * 1. Returns FALSE if the user is still on any login, signin, or onboarding screen.
+     * 2. Checks ONLY real authenticated account tokens (never anonymous/guest tokens like csrf, token_v2, ct0).
      */
     fun hasAuthSession(url: String, cookieHeader: String): Boolean {
         if (cookieHeader.isBlank()) return false
-        val h = url.lowercase()
+        val u = url.lowercase()
+
+        // 1. NEVER consider logged-in if still on an authentication / login / onboarding screen
+        val isStillOnLoginPage = u.contains("/login") ||
+                u.contains("/signin") ||
+                u.contains("servicelogin") ||
+                u.contains("/accounts/login") ||
+                u.contains("/i/flow/login") ||
+                u.contains("/onboarding") ||
+                u.contains("v3/signin") ||
+                u.contains("accounts.google.com")
+
+        if (isStillOnLoginPage) {
+            return false
+        }
+
+        // 2. Platform-specific REAL authenticated session token verification
         return when {
-            h.contains("youtube.com") || h.contains("google.com") -> {
-                cookieHeader.contains("LOGIN_INFO") ||
-                (cookieHeader.contains("SID=") && cookieHeader.contains("HSID=")) ||
-                cookieHeader.contains("SAPISID=")
+            u.contains("youtube.com") -> {
+                // Must be on youtube.com (redirected from Google accounts) AND have LOGIN_INFO or SID
+                cookieHeader.contains("LOGIN_INFO=") ||
+                (cookieHeader.contains("SID=") && cookieHeader.contains("HSID="))
             }
-            h.contains("instagram.com") -> {
-                cookieHeader.contains("sessionid=") || cookieHeader.contains("ds_user_id=")
+            u.contains("instagram.com") -> {
+                // Instagram ONLY assigns sessionid after valid credential verification
+                cookieHeader.contains("sessionid=") && cookieHeader.contains("ds_user_id=")
             }
-            h.contains("reddit.com") -> {
-                cookieHeader.contains("reddit_session=") || cookieHeader.contains("token_v2=")
+            u.contains("reddit.com") -> {
+                // Reddit ONLY assigns reddit_session after account login (never token_v2)
+                cookieHeader.contains("reddit_session=")
             }
-            h.contains("tiktok.com") -> {
-                cookieHeader.contains("sessionid=") || cookieHeader.contains("sid_guard=")
+            u.contains("tiktok.com") -> {
+                // TikTok assigns sessionid after login (not just anonymous sid_guard)
+                cookieHeader.contains("sessionid=") && !cookieHeader.contains("sessionid=\"\"")
             }
-            h.contains("twitter.com") || h.contains("x.com") -> {
-                cookieHeader.contains("auth_token=") || cookieHeader.contains("ct0=")
+            u.contains("x.com") || u.contains("twitter.com") -> {
+                // X ONLY assigns auth_token after successful account login (ct0 is just anonymous CSRF)
+                cookieHeader.contains("auth_token=")
             }
-            h.contains("vimeo.com") -> {
-                cookieHeader.contains("vuid=") || cookieHeader.contains("auth")
-            }
-            else -> {
-                cookieHeader.contains("session", ignoreCase = true) ||
-                cookieHeader.contains("auth", ignoreCase = true) ||
-                cookieHeader.contains("token", ignoreCase = true)
-            }
+            else -> false
         }
     }
+
 
     /**
      * Returns human-readable platform names that currently have saved cookies.

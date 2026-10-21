@@ -679,7 +679,7 @@ fun InAppBrowserOverlay(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isAutoCaptured) "Captured!" else if (detectedCookiesCount > 0) "Save ($detectedCookiesCount)" else "Save",
+                                text = if (isAutoCaptured) "Captured!" else "Save Session",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
