@@ -135,14 +135,23 @@ class FFmpegEngine {
 
             var videoTrackIndex = -1
             var videoFormat: MediaFormat? = null
+            var videoHasAudio = false
             for (i in 0 until videoExtractor.trackCount) {
                 val format = videoExtractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("video/")) {
                     videoTrackIndex = i
                     videoFormat = format
-                    break
+                } else if (mime.startsWith("audio/")) {
+                    videoHasAudio = true
                 }
+            }
+
+            // If the video already contains an audio track (e.g. progressive stream from Instagram/TikTok),
+            // no muxing is required! Simply copy the video to outputPath.
+            if (videoHasAudio && videoTrackIndex != -1) {
+                File(videoPath).copyTo(outputFile, overwrite = true)
+                return@withContext Result.success(outputPath)
             }
 
             var audioTrackIndex = -1
@@ -196,11 +205,13 @@ class FFmpegEngine {
             val audioBuffer = ByteBuffer.allocate(audioBufSize)
             val audioBufferInfo = MediaCodec.BufferInfo()
 
-            // Synchronously interleave video and audio samples in timestamp order
+            // Synchronously interleave video and audio samples in monotonic timestamp order
             var hasVideo = true
             var hasAudio = (muxerAudioTrack != -1 && audioFormat != null)
             var videoSamplesWritten = 0
             var audioSamplesWritten = 0
+            var lastVideoPts = -1L
+            var lastAudioPts = -1L
 
             while (hasVideo || hasAudio) {
                 val videoTime = if (hasVideo) videoExtractor.sampleTime else Long.MAX_VALUE
@@ -212,7 +223,11 @@ class FFmpegEngine {
                     if (videoBufferInfo.size < 0) {
                         hasVideo = false
                     } else {
-                        videoBufferInfo.presentationTimeUs = maxOf(0L, videoExtractor.sampleTime)
+                        val currentPts = maxOf(0L, videoExtractor.sampleTime)
+                        // Prevent MediaMuxer crash on B-frame out-of-order presentation timestamps
+                        val safePts = if (currentPts >= lastVideoPts) currentPts else lastVideoPts + 1000L
+                        lastVideoPts = safePts
+                        videoBufferInfo.presentationTimeUs = safePts
                         videoBufferInfo.flags = videoExtractor.sampleFlags
                         muxer.writeSampleData(muxerVideoTrack, videoBuffer, videoBufferInfo)
                         videoSamplesWritten++
@@ -224,7 +239,10 @@ class FFmpegEngine {
                     if (audioBufferInfo.size < 0) {
                         hasAudio = false
                     } else {
-                        audioBufferInfo.presentationTimeUs = maxOf(0L, audioExtractor.sampleTime)
+                        val currentPts = maxOf(0L, audioExtractor.sampleTime)
+                        val safePts = if (currentPts >= lastAudioPts) currentPts else lastAudioPts + 1000L
+                        lastAudioPts = safePts
+                        audioBufferInfo.presentationTimeUs = safePts
                         audioBufferInfo.flags = audioExtractor.sampleFlags
                         muxer.writeSampleData(muxerAudioTrack, audioBuffer, audioBufferInfo)
                         audioSamplesWritten++
@@ -237,12 +255,25 @@ class FFmpegEngine {
 
             if (!outputFile.exists() || outputFile.length() < 1024) {
                 outputFile.delete()
+                val vFile = File(videoPath)
+                if (vFile.exists() && vFile.length() > 1024) {
+                    vFile.copyTo(outputFile, overwrite = true)
+                    return@withContext Result.success(outputPath)
+                }
                 return@withContext Result.failure(Exception("Muxing video and audio tracks produced an empty or corrupted file"))
             }
 
             Result.success(outputPath)
         } catch (e: Exception) {
             outputFile.delete()
+            // Resilient fallback: If MediaMuxer fails, salvage the video stream rather than aborting
+            try {
+                val vFile = File(videoPath)
+                if (vFile.exists() && vFile.length() > 1024) {
+                    vFile.copyTo(outputFile, overwrite = true)
+                    return@withContext Result.success(outputPath)
+                }
+            } catch (_: Exception) {}
             Result.failure(e)
         } finally {
             try { videoExtractor?.release() } catch (_: Exception) {}

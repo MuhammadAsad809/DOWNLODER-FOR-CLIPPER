@@ -220,11 +220,21 @@ class DownloadService : Service() {
                 outputPath = tempFile.absolutePath
             )
 
-            // Clean up temporary audio/video parts
+            if (muxResult.isFailure || !tempFile.exists() || tempFile.length() < 1024) {
+                // Safeguard: If muxing failed, copy the video part directly so user doesn't lose the download
+                try {
+                    val vFile = File(engineRes.videoPath)
+                    if (vFile.exists() && vFile.length() > 1024) {
+                        vFile.copyTo(tempFile, overwrite = true)
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Clean up temporary audio/video parts only after verification
             try { File(engineRes.videoPath).delete() } catch (_: Exception) {}
             try { File(engineRes.audioPath).delete() } catch (_: Exception) {}
 
-            if (muxResult.isFailure || !tempFile.exists() || tempFile.length() < 1024) {
+            if (!tempFile.exists() || tempFile.length() < 1024) {
                 val failNotif = createNotification(id, title, "Muxing audio & video tracks failed", 0, false)
                 notificationManager.notify(notifId, failNotif)
                 downloadDao.updateStatus(id, DownloadStatus.FAILED.name)

@@ -332,6 +332,10 @@ def inspect_url(url, cookies_path=None):
         total_bitrate = tbr or (vbr + abr)
         quality_score = (audio_bonus + codec_bonus + total_bitrate, filesize, fps)
 
+        is_social_platform = any(k in canonical_url.lower() for k in [
+            'instagram.com', 'instagr.am', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com', 'fb.watch'
+        ])
+
         candidate_data = {
             "format_id": fid,
             "ext": ext,
@@ -345,7 +349,7 @@ def inspect_url(url, cookies_path=None):
             "acodec": acodec,
             "fps": fps or 0,
             "tbr": tbr or 0,
-            "needs_audio": (is_video and not has_sound and has_standalone_audio),
+            "needs_audio": False if is_social_platform else (is_video and not has_sound and has_standalone_audio),
             "direct_url": f.get('url') or ''
         }
 
@@ -558,8 +562,14 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         except Exception:
             pass
 
-        # Only attempt separate video + audio download if standalone audio stream actually exists
-        if is_video_only and has_standalone_audio:
+        # Social platforms (Instagram, TikTok, Facebook, Twitter) serve progressive MP4s
+        # with video and audio already combined on the CDN. They must never be split or muxed.
+        is_social_platform = any(k in canonical_url.lower() for k in [
+            'instagram.com', 'instagr.am', 'tiktok.com', 'twitter.com', 'x.com', 'facebook.com', 'fb.watch'
+        ])
+
+        # Only attempt separate video + audio download if standalone audio stream actually exists AND not a social progressive platform
+        if is_video_only and has_standalone_audio and not is_social_platform:
             video_tmp = f"{output_path}.video.tmp"
             audio_tmp = f"{output_path}.audio.tmp"
 
@@ -606,8 +616,10 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
 
         # Combined / Progressive format (preferred for Instagram, TikTok, Facebook, Twitter)
         c_opts = dict(base_opts)
-        # If the requested format is video-only but has no audio stream to mux with, fallback to best progressive
-        if is_video_only and not has_standalone_audio:
+        if is_social_platform:
+            # On Instagram and social platforms, download the full progressive MP4 with audio
+            c_opts['format'] = f"{format_id}/best[ext=mp4]/best" if (format_id and not format_id.startswith('dash')) else 'best[ext=mp4]/best'
+        elif is_video_only and not has_standalone_audio:
             c_opts['format'] = 'best[ext=mp4]/best'
         else:
             c_opts['format'] = f"{format_id}/best[ext=mp4]/best" if format_id else 'best[ext=mp4]/best'
