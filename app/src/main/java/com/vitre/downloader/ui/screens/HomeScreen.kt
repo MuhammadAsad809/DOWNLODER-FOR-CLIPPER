@@ -19,7 +19,18 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.activity.compose.BackHandler
+import android.net.Uri
+import android.view.ViewGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -1139,7 +1150,7 @@ fun LiquidGlassDownloadButton(
  * iOS Springy Media Inspection Modal with Big Half-Size Cinematic Preview,
  * Liquid Glass styling, Platform 3D Badging, Video Clipper & Format Selector.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, UnstableApi::class)
 @Composable
 fun IosSpringyMediaInspectionModal(
     mediaInfo: MediaInfo,
@@ -1148,7 +1159,14 @@ fun IosSpringyMediaInspectionModal(
     defaultQuality: String = "best",
     defaultAudioFormat: String = "mp3"
 ) {
+    val context = LocalContext.current
     var isAudioOnly by remember { mutableStateOf(false) }
+
+    // Live Video Preview states
+    var isPlayingPreview by remember { mutableStateOf(false) }
+    var isPreviewBuffering by remember { mutableStateOf(false) }
+    var previewPlaybackError by remember { mutableStateOf<String?>(null) }
+    var exoPlayerInstance by remember { mutableStateOf<ExoPlayer?>(null) }
 
     val isImageOnly = remember(mediaInfo) {
         mediaInfo.isImagePost || (mediaInfo.formats.any { it.isImage } && !mediaInfo.formats.any { it.isVideo })
@@ -1167,6 +1185,73 @@ fun IosSpringyMediaInspectionModal(
             if (isImageOnly) (imageFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
             else (preferred ?: videoFormats.firstOrNull() ?: mediaInfo.formats.firstOrNull())
         )
+    }
+
+    // Resolve target stream preview URL (prefer mediaInfo.previewUrl or format direct URL)
+    val targetPreviewUrl = remember(mediaInfo, selectedFormat) {
+        val formatUrl = selectedFormat?.directUrl?.takeIf { it.isNotBlank() }
+        val streamUrl = mediaInfo.previewUrl.takeIf { it.isNotBlank() }
+        val fallbackFormat = mediaInfo.formats.firstOrNull { it.directUrl.isNotBlank() && it.isVideo }?.directUrl
+        streamUrl ?: formatUrl ?: fallbackFormat ?: mediaInfo.url
+    }
+
+    fun stopVideoPreview() {
+        isPlayingPreview = false
+        isPreviewBuffering = false
+        previewPlaybackError = null
+        try {
+            exoPlayerInstance?.stop()
+            exoPlayerInstance?.release()
+        } catch (_: Exception) {}
+        exoPlayerInstance = null
+    }
+
+    fun startVideoPreview() {
+        if (targetPreviewUrl.isBlank()) return
+        stopVideoPreview()
+        previewPlaybackError = null
+        isPlayingPreview = true
+        isPreviewBuffering = true
+
+        try {
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent("Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36")
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(15000)
+
+            val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(httpFactory)
+            val player = ExoPlayer.Builder(context)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build().apply {
+                    val item = MediaItem.fromUri(Uri.parse(targetPreviewUrl))
+                    setMediaItem(item)
+                    prepare()
+                    playWhenReady = true
+                }
+
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    isPreviewBuffering = (playbackState == Player.STATE_BUFFERING)
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    isPreviewBuffering = false
+                    previewPlaybackError = "Stream preview unavailable"
+                }
+            })
+
+            exoPlayerInstance = player
+        } catch (e: Exception) {
+            isPreviewBuffering = false
+            previewPlaybackError = e.message ?: "Failed to initialize player"
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            stopVideoPreview()
+        }
     }
 
     // Clipper state
@@ -1289,7 +1374,10 @@ fun IosSpringyMediaInspectionModal(
                         .size(28.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.08f))
-                        .clickable { onDismiss() },
+                        .clickable {
+                            stopVideoPreview()
+                            onDismiss()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -1304,7 +1392,7 @@ fun IosSpringyMediaInspectionModal(
             Spacer(modifier = Modifier.height(14.dp))
 
             // 2. Large Cinematic 16:9 Media Preview Banner (Half-card prominence)
-            val bannerHeight = 185.dp
+            val bannerHeight = 200.dp
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1323,98 +1411,38 @@ fun IosSpringyMediaInspectionModal(
                         shape = RoundedCornerShape(20.dp)
                     )
             ) {
-                if (mediaInfo.thumbnail.isNotBlank()) {
-                    AsyncImage(
-                        model = mediaInfo.thumbnail,
-                        contentDescription = mediaInfo.title,
-                        contentScale = ContentScale.Crop,
+                if (isPlayingPreview && exoPlayerInstance != null && previewPlaybackError == null) {
+                    // Active Video Preview Player View
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                player = exoPlayerInstance
+                                useController = true
+                                setShowNextButton(false)
+                                setShowPreviousButton(false)
+                                setShowFastForwardButton(true)
+                                setShowRewindButton(true)
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                            }
+                        },
+                        update = { pv ->
+                            pv.player = exoPlayerInstance
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
-                } else {
+
+                    // Top-Left Glass Close / Stop Preview Pill
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        Color(0xFF1E2A3E),
-                                        Color(0xFF0B1019)
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color(0xFF00D2FF),
-                            modifier = Modifier.size(56.dp)
-                        )
-                    }
-                }
-
-                // Vignette and bottom gradient overlay for legibility
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.25f),
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.75f)
-                                )
-                            )
-                        )
-                )
-
-                // Center Liquid Glass Play Disc
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .align(Alignment.Center)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .border(
-                            1.2.dp,
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.White.copy(alpha = 0.7f),
-                                    Color(0xFF00D2FF).copy(alpha = 0.5f)
-                                )
-                            ),
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color(0xFF00D2FF),
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                // Top-Right "Save Thumbnail" button
-                if (mediaInfo.thumbnail.isNotBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
+                            .align(Alignment.TopStart)
                             .padding(10.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black.copy(alpha = 0.65f))
-                            .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                            .clickable {
-                                val thumbFormat = FormatOption(
-                                    formatId = mediaInfo.thumbnail,
-                                    ext = "jpg",
-                                    resolution = "Thumbnail (HD)",
-                                    isImage = true,
-                                    isVideo = false,
-                                    isAudio = false
-                                )
-                                onConfirm(mediaInfo, thumbFormat, false, "mp3", null, null)
-                            }
+                            .background(Color.Black.copy(alpha = 0.70f))
+                            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                            .clickable { stopVideoPreview() }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Row(
@@ -1422,56 +1450,214 @@ fun IosSpringyMediaInspectionModal(
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = "Save Thumbnail",
-                                tint = Color(0xFF00D2FF),
-                                modifier = Modifier.size(14.dp)
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Preview",
+                                tint = Color(0xFFCBD5E1),
+                                modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = "Save Thumbnail",
-                                color = Color.White,
+                                text = "Close Preview",
+                                color = Color(0xFFF1F5F9),
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
-                }
 
-                // Bottom-Left Quality / Type Pill
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(10.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF00D2FF).copy(alpha = 0.25f))
-                        .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (isImageOnly) "IMAGE POST" else if (videoFormats.any { it.resolution.contains("1080") || it.resolution.contains("4K") || it.resolution.contains("2160") }) "ULTRA HD" else "HD VIDEO",
-                        color = Color(0xFF00D2FF),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                    // Buffering Indicator Overlay
+                    if (isPreviewBuffering) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(42.dp),
+                                color = Color(0xFF00D2FF),
+                                strokeWidth = 3.dp
+                            )
+                        }
+                    }
+                } else {
+                    // Static thumbnail with Clickable Play disc
+                    if (mediaInfo.thumbnail.isNotBlank()) {
+                        AsyncImage(
+                            model = mediaInfo.thumbnail,
+                            contentDescription = mediaInfo.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable { if (!isImageOnly) startVideoPreview() }
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            Color(0xFF1E2A3E),
+                                            Color(0xFF0B1019)
+                                        )
+                                    )
+                                )
+                                .clickable { if (!isImageOnly) startVideoPreview() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color(0xFF00D2FF),
+                                modifier = Modifier.size(56.dp)
+                            )
+                        }
+                    }
 
-                // Bottom-Right Duration badge
-                if (mediaInfo.duration > 0) {
+                    // Vignette and bottom gradient overlay for legibility
                     Box(
                         modifier = Modifier
-                            .align(Alignment.BottomEnd)
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.25f),
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.75f)
+                                    )
+                                )
+                            )
+                    )
+
+                    // Center Liquid Glass Play Disc
+                    if (!isImageOnly) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .align(Alignment.Center)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.50f))
+                                .border(
+                                    1.4.dp,
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color.White.copy(alpha = 0.85f),
+                                            Color(0xFF00D2FF).copy(alpha = 0.65f)
+                                        )
+                                    ),
+                                    CircleShape
+                                )
+                                .clickable { startVideoPreview() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play Preview",
+                                tint = Color(0xFF00D2FF),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+
+                    // Playback error badge if any
+                    if (previewPlaybackError != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .offset(y = 44.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.85f))
+                                .border(1.dp, Color(0xFFFF5252).copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = previewPlaybackError ?: "Preview unavailable",
+                                color = Color(0xFFFF5252),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // Top-Right "Save Thumbnail" button
+                    if (mediaInfo.thumbnail.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(10.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.65f))
+                                .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val thumbFormat = FormatOption(
+                                        formatId = mediaInfo.thumbnail,
+                                        ext = "jpg",
+                                        resolution = "Thumbnail (HD)",
+                                        isImage = true,
+                                        isVideo = false,
+                                        isAudio = false
+                                    )
+                                    stopVideoPreview()
+                                    onConfirm(mediaInfo, thumbFormat, false, "mp3", null, null)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Save Thumbnail",
+                                    tint = Color(0xFF00D2FF),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Save Thumbnail",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Bottom-Left Quality / Type Pill
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
                             .padding(10.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.75f))
-                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .background(Color(0xFF00D2FF).copy(alpha = 0.25f))
+                            .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = formatSecs(mediaInfo.duration),
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = if (isImageOnly) "IMAGE POST" else if (videoFormats.any { it.resolution.contains("1080") || it.resolution.contains("4K") || it.resolution.contains("2160") }) "ULTRA HD" else "HD VIDEO",
+                            color = Color(0xFF00D2FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
+                    }
+
+                    // Bottom-Right Duration badge
+                    if (mediaInfo.duration > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(10.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.75f))
+                                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = formatSecs(mediaInfo.duration),
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
@@ -1843,7 +2029,10 @@ fun IosSpringyMediaInspectionModal(
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color.White.copy(alpha = 0.08f))
                         .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
-                        .clickable { onDismiss() },
+                        .clickable {
+                            stopVideoPreview()
+                            onDismiss()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -1883,6 +2072,7 @@ fun IosSpringyMediaInspectionModal(
                             } else {
                                 selectedFormat ?: mediaInfo.formats.first()
                             }
+                            stopVideoPreview()
                             onConfirm(mediaInfo, fmt, isAudioOnly, selectedAudioFormat, parsedStart, parsedEnd)
                         },
                     contentAlignment = Alignment.Center

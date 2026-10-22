@@ -113,10 +113,11 @@ dependencies {
     // Storage Access Framework DocumentFile
     implementation("androidx.documentfile:documentfile:1.0.1")
 
-    // Media3 ExoPlayer for Local Playback
+    // Media3 ExoPlayer for Local Playback & Network Streaming
     val media3Version = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
+    implementation("androidx.media3:media3-datasource:$media3Version")
 
     // Media3 Transformer for Native Media Processing
     implementation("androidx.media3:media3-transformer:$media3Version")

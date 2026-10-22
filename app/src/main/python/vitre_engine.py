@@ -711,9 +711,41 @@ def inspect_url(url, cookies_path=None):
             if sorted_thumbs and sorted_thumbs[0].get('url'):
                 best_thumbnail = sorted_thumbs[0]['url']
 
+    # Resolve best playable preview video stream URL (prefer progressive MP4 <= 720p with audio, or HLS)
+    preview_url = ""
+    all_formats = info.get('formats') or []
+    playable_streams = [
+        f for f in all_formats
+        if f.get('url') and (f.get('vcodec') or 'none') != 'none' and (f.get('acodec') or 'none') != 'none'
+    ]
+    if playable_streams:
+        suitable = [s for s in playable_streams if 360 <= (s.get('height') or 0) <= 720]
+        if suitable:
+            preview_url = suitable[-1].get('url') or ""
+        else:
+            preview_url = playable_streams[0].get('url') or ""
+
+    if not preview_url:
+        hls_streams = [
+            f for f in all_formats
+            if f.get('url') and ('.m3u8' in f.get('url', '') or f.get('protocol') in ['m3u8', 'm3u8_native'])
+        ]
+        if hls_streams:
+            preview_url = hls_streams[0].get('url') or ""
+
+    if not preview_url and info.get('url'):
+        preview_url = info.get('url') or ""
+
+    if not preview_url and formats:
+        for fmt in formats:
+            if fmt.get('direct_url') and fmt.get('is_video'):
+                preview_url = fmt['direct_url']
+                break
+
     result = {
         "title": info.get('title', 'Unknown Title'),
         "thumbnail": best_thumbnail,
+        "preview_url": preview_url,
         "duration": info.get('duration', 0),
         "uploader": info.get('uploader') or info.get('channel', 'Unknown'),
         "extractor": info.get('extractor', 'generic'),

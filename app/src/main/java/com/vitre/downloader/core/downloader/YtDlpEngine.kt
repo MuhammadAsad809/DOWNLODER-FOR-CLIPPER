@@ -72,6 +72,14 @@ class YtDlpEngine {
                     }
                 }
 
+                val rawPreviewUrl = json.optString("preview_url", "")
+                val previewUrl = rawPreviewUrl.ifBlank {
+                    formatsList.firstOrNull { it.directUrl.isNotBlank() && it.isVideo && !it.needsAudio }?.directUrl
+                        ?: formatsList.firstOrNull { it.directUrl.isNotBlank() && it.isVideo }?.directUrl
+                        ?: formatsList.firstOrNull { it.directUrl.isNotBlank() }?.directUrl
+                        ?: ""
+                }
+
                 Result.success(
                     MediaInfo(
                         title = title,
@@ -81,7 +89,8 @@ class YtDlpEngine {
                         extractor = extractor,
                         url = webUrl,
                         formats = formatsList,
-                        isImagePost = isImagePost
+                        isImagePost = isImagePost,
+                        previewUrl = previewUrl
                     )
                 )
             } catch (e: Exception) {

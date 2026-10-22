@@ -8,7 +8,8 @@ data class MediaInfo(
     val extractor: String,
     val url: String,
     val formats: List<FormatOption>,
-    val isImagePost: Boolean = false
+    val isImagePost: Boolean = false,
+    val previewUrl: String = ""
 )
 
 data class FormatOption(

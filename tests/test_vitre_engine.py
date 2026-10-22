@@ -404,6 +404,21 @@ class VitreEngineTests(unittest.TestCase):
             is_direct_url = bool(thumb_url and (thumb_url.startswith('http://') or thumb_url.startswith('https://')))
             self.assertTrue(is_direct_url)
 
+    def test_playable_preview_url_selection(self):
+        # Stream selection preferring progressive MP4 with sound <= 720p
+        formats = [
+            {'format_id': '137', 'url': 'https://cdn.example.com/1080p_dash.mp4', 'vcodec': 'avc1', 'acodec': 'none', 'height': 1080},
+            {'format_id': '18', 'url': 'https://cdn.example.com/360p_prog.mp4', 'vcodec': 'avc1', 'acodec': 'mp4a', 'height': 360},
+            {'format_id': '22', 'url': 'https://cdn.example.com/720p_prog.mp4', 'vcodec': 'avc1', 'acodec': 'mp4a', 'height': 720},
+        ]
+        playable_streams = [
+            f for f in formats
+            if f.get('url') and (f.get('vcodec') or 'none') != 'none' and (f.get('acodec') or 'none') != 'none'
+        ]
+        suitable = [s for s in playable_streams if 360 <= (s.get('height') or 0) <= 720]
+        preview_url = suitable[-1].get('url') if suitable else playable_streams[0].get('url')
+        self.assertEqual(preview_url, 'https://cdn.example.com/720p_prog.mp4')
+
 if __name__ == '__main__':
     unittest.main()
 
