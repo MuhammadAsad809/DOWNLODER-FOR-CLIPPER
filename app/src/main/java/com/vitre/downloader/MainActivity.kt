@@ -201,7 +201,12 @@ class MainActivity : ComponentActivity() {
                                                 String.format("%02d:%02d - %02d:%02d", sM, sS, eM, eS)
                                             } else null
 
-                                            val displayTitle = if (clipRangeStr != null) "${info.title} [Clip $clipRangeStr]" else info.title
+                                            val isThumbnailDownload = format.isImage && (format.formatId == info.thumbnail || format.resolution.contains("Thumbnail", ignoreCase = true))
+                                            val displayTitle = when {
+                                                isThumbnailDownload -> "${info.title} - Thumbnail"
+                                                clipRangeStr != null -> "${info.title} [Clip $clipRangeStr]"
+                                                else -> info.title
+                                            }
 
                                             // 1. Insert download record in DB
                                             app.database.downloadDao().insertDownload(
@@ -211,7 +216,11 @@ class MainActivity : ComponentActivity() {
                                                     title = displayTitle,
                                                     thumbnail = info.thumbnail,
                                                     formatId = format.formatId,
-                                                    resolution = if (isAudioOnly) "Audio (${audioFormat.uppercase()})" else format.resolution,
+                                                    resolution = when {
+                                                        isThumbnailDownload -> "Thumbnail (HD)"
+                                                        isAudioOnly -> "Audio (${audioFormat.uppercase()})"
+                                                        else -> format.resolution
+                                                    },
                                                     filesize = format.filesize,
                                                     status = DownloadStatus.QUEUED.name,
                                                     progress = 0f,

@@ -1395,6 +1395,48 @@ fun IosSpringyMediaInspectionModal(
                     )
                 }
 
+                // Top-Right "Save Thumbnail" button
+                if (mediaInfo.thumbnail.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.65f))
+                            .border(1.dp, Color(0xFF00D2FF).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                val thumbFormat = FormatOption(
+                                    formatId = mediaInfo.thumbnail,
+                                    ext = "jpg",
+                                    resolution = "Thumbnail (HD)",
+                                    isImage = true,
+                                    isVideo = false,
+                                    isAudio = false
+                                )
+                                onConfirm(mediaInfo, thumbFormat, false, "mp3", null, null)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Save Thumbnail",
+                                tint = Color(0xFF00D2FF),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Save Thumbnail",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
                 // Bottom-Left Quality / Type Pill
                 Box(
                     modifier = Modifier
@@ -1566,8 +1608,76 @@ fun IosSpringyMediaInspectionModal(
                 }
             }
 
-            // 6. Video Clipper / Trimmer Controls
-            if (!isImageOnly && !isAudioOnly) {
+            // 5b. Download Thumbnail Quick Action
+            if (mediaInfo.thumbnail.isNotBlank() && !isImageOnly) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF101726))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val thumbFormat = FormatOption(
+                                formatId = mediaInfo.thumbnail,
+                                ext = "jpg",
+                                resolution = "Thumbnail (HD)",
+                                isImage = true,
+                                isVideo = false,
+                                isAudio = false
+                            )
+                            onConfirm(mediaInfo, thumbFormat, false, "mp3", null, null)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00D2FF).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00D2FF),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Download Thumbnail (HD)",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Save high-resolution cover image to Gallery",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF8E9BB0)
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Download",
+                            tint = Color(0xFF00D2FF),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            // 6. Video / Audio Clipper / Trimmer Controls
+            if (!isImageOnly) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(
                     modifier = Modifier
@@ -1592,7 +1702,7 @@ fun IosSpringyMediaInspectionModal(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Clip / Trim Video",
+                                    text = if (isAudioOnly) "Clip / Trim Audio" else "Clip / Trim Video",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                     color = if (enableClipping) Color(0xFF00D2FF) else Color(0xFFF5F8FC)
                                 )

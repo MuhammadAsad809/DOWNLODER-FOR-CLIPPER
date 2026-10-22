@@ -304,15 +304,19 @@ class DownloadService : Service() {
             }
         }
 
-        // 4. Video Clipper: Trim file if user requested a specific time slice
-        if (clipStart != null && clipEnd != null && clipEnd > clipStart && !isAudioOnly) {
-            val trimNotif = createNotification(id, title, "Clipping video segment...", 98, false)
+        // 4. Video/Audio Clipper: Trim file if user requested a specific time slice
+        var clippingSucceeded = false
+        if (clipStart != null && clipEnd != null && clipEnd > clipStart && !isImage) {
+            val trimNotif = createNotification(id, title, "Clipping media segment...", 98, false)
             notificationManager.notify(notifId, trimNotif)
             serviceScope.launch {
-                downloadDao.updateProgress(id, 0.98f, "Clipping video segment...")
+                downloadDao.updateProgress(id, 0.98f, "Clipping media segment...")
             }
 
-            val clippedFile = File(tempDir, "${id}_${safeTitle}_clip_${clipStart}s_${clipEnd}s.mp4")
+            val isWebMInput = !isAudioOnly && isWebM(finalFile)
+            val detectedAudioExt = if (isAudioOnly) detectAudioContainer(finalFile).first else "mp4"
+            val clipExt = if (isAudioOnly) detectedAudioExt else (if (isWebMInput) "webm" else "mp4")
+            val clippedFile = File(tempDir, "${id}_${safeTitle}_clip_${clipStart}s_${clipEnd}s.$clipExt")
             val trimResult = ffmpegEngine.trimMedia(
                 inputPath = finalFile.absolutePath,
                 outputPath = clippedFile.absolutePath,
@@ -322,12 +326,11 @@ class DownloadService : Service() {
             if (trimResult.isSuccess && clippedFile.exists() && clippedFile.length() > 1024) {
                 finalFile.delete()
                 finalFile = clippedFile
+                clippingSucceeded = true
             } else {
-                val failNotif = createNotification(id, title, "Trimming video clip failed", 0, false)
-                notificationManager.notify(notifId, failNotif)
-                downloadDao.updateStatus(id, DownloadStatus.FAILED.name)
-                cleanupAndFinish(id, listOf(finalFile, clippedFile))
-                return
+                // Resilient fallback: Preserve full downloaded media file instead of destroying it
+                try { if (clippedFile.exists()) clippedFile.delete() } catch (_: Exception) {}
+                android.util.Log.w("DownloadService", "Clipping skipped/failed, keeping full media", trimResult.exceptionOrNull())
             }
         }
 
@@ -349,7 +352,7 @@ class DownloadService : Service() {
             else -> "video/mp4"
         }
 
-        val clipSuffix = if (clipStart != null && clipEnd != null) "_clip" else ""
+        val clipSuffix = if (clippingSucceeded) "_clip" else ""
         val finalDisplayName = "$safeTitle$clipSuffix.$ext"
 
         serviceScope.launch {

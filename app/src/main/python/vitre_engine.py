@@ -697,9 +697,23 @@ def inspect_url(url, cookies_path=None):
 
     is_image_post = any(f.get('is_image') for f in formats) and not any(f.get('is_video') for f in formats)
 
+    # Resolve highest-resolution thumbnail available (prefer maxres/hd over small preview)
+    best_thumbnail = info.get('thumbnail', '')
+    raw_thumbnails = info.get('thumbnails')
+    if raw_thumbnails and isinstance(raw_thumbnails, list):
+        valid_thumbs = [t for t in raw_thumbnails if isinstance(t, dict) and t.get('url')]
+        if valid_thumbs:
+            sorted_thumbs = sorted(
+                valid_thumbs,
+                key=lambda t: (t.get('preference') or 0, (t.get('width') or 0) * (t.get('height') or 0)),
+                reverse=True
+            )
+            if sorted_thumbs and sorted_thumbs[0].get('url'):
+                best_thumbnail = sorted_thumbs[0]['url']
+
     result = {
         "title": info.get('title', 'Unknown Title'),
-        "thumbnail": info.get('thumbnail', ''),
+        "thumbnail": best_thumbnail,
         "duration": info.get('duration', 0),
         "uploader": info.get('uploader') or info.get('channel', 'Unknown'),
         "extractor": info.get('extractor', 'generic'),
@@ -894,7 +908,10 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
             audio_tmp = f"{output_path}.audio.tmp"
 
             v_opts = dict(base_opts)
-            v_opts['format'] = f"{format_id}/bestvideo[ext=mp4]/bestvideo/best"
+            if clip_start is not None and clip_end is not None:
+                v_opts['format'] = f"{format_id}[vcodec^=avc1]/bestvideo[vcodec^=avc1][ext=mp4]/{format_id}/bestvideo[ext=mp4]/bestvideo/best"
+            else:
+                v_opts['format'] = f"{format_id}/bestvideo[ext=mp4]/bestvideo/best"
             v_opts['outtmpl'] = video_tmp
             v_opts['progress_hooks'] = [make_hook("dash_video")]
 
@@ -939,6 +956,8 @@ def download_media(url, format_id, output_path, cookies_path=None, callback=None
         if is_social_platform:
             # On Instagram and social platforms, download the full progressive MP4 with audio
             c_opts['format'] = f"{format_id}/best[ext=mp4]/best" if (format_id and not format_id.startswith('dash')) else 'best[ext=mp4]/best'
+        elif clip_start is not None and clip_end is not None:
+            c_opts['format'] = f"{format_id}[vcodec^=avc1]/best[vcodec^=avc1][ext=mp4]/{format_id}/best[ext=mp4]/best"
         elif is_video_only and not has_standalone_audio:
             c_opts['format'] = 'best[ext=mp4]/best'
         else:

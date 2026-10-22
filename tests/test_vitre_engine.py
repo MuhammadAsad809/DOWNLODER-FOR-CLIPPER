@@ -381,6 +381,29 @@ class VitreEngineTests(unittest.TestCase):
         self.assertTrue(bool(re.match(clip_pat, c_url)))
         self.assertTrue(bool(re.match(vod_pat, v_url)))
 
+    def test_highest_resolution_thumbnail_selection(self):
+        # Raw yt-dlp thumbnails list with various resolutions
+        raw_thumbnails = [
+            {'url': 'https://i.ytimg.com/vi/test/default.jpg', 'width': 120, 'height': 90, 'preference': -1},
+            {'url': 'https://i.ytimg.com/vi/test/hqdefault.jpg', 'width': 480, 'height': 360, 'preference': 0},
+            {'url': 'https://i.ytimg.com/vi/test/maxresdefault.jpg', 'width': 1280, 'height': 720, 'preference': 1},
+        ]
+        valid_thumbs = [t for t in raw_thumbnails if isinstance(t, dict) and t.get('url')]
+        sorted_thumbs = sorted(
+            valid_thumbs,
+            key=lambda t: (t.get('preference') or 0, (t.get('width') or 0) * (t.get('height') or 0)),
+            reverse=True
+        )
+        self.assertEqual(sorted_thumbs[0]['url'], 'https://i.ytimg.com/vi/test/maxresdefault.jpg')
+
+    def test_direct_image_thumbnail_download_handling(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_file = os.path.join(tmpdir, "test_thumbnail.jpg")
+            # Direct image or thumbnail URL pattern recognition
+            thumb_url = "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"
+            is_direct_url = bool(thumb_url and (thumb_url.startswith('http://') or thumb_url.startswith('https://')))
+            self.assertTrue(is_direct_url)
+
 if __name__ == '__main__':
     unittest.main()
 

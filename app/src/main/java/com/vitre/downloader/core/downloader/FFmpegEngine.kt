@@ -316,6 +316,11 @@ class FFmpegEngine {
             outputFile.delete()
         }
 
+        val inputFile = File(inputPath)
+        if (!inputFile.exists() || inputFile.length() < 1024) {
+            return@withContext Result.failure(Exception("Input media file is missing or empty"))
+        }
+
         var extractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
 
@@ -329,82 +334,150 @@ class FFmpegEngine {
                 return@withContext Result.failure(Exception("No tracks found in media file"))
             }
 
-            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // Determine if input uses VP8/VP9 or Opus/Vorbis (requiring WebM container)
+            var hasVpVideo = false
+            var hasOpusAudio = false
+            var maxInputBufSize = 4 * 1024 * 1024
+
+            for (i in 0 until trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.contains("vp8") || mime.contains("vp9")) hasVpVideo = true
+                if (mime.contains("opus") || mime.contains("vorbis")) hasOpusAudio = true
+                if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                    val buf = format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                    if (buf > maxInputBufSize) maxInputBufSize = buf
+                }
+            }
+
+            val outputContainer = if (hasVpVideo || hasOpusAudio) {
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+            } else {
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            }
+
+            muxer = MediaMuxer(outputPath, outputContainer)
             val trackMap = mutableMapOf<Int, Int>()
             var videoTrackIndex = -1
+            var audioTrackIndex = -1
 
             for (i in 0 until trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("video/") || mime.startsWith("audio/")) {
-                    val muxerTrack = muxer.addTrack(format)
-                    trackMap[i] = muxerTrack
-                    extractor.selectTrack(i)
-                    if (mime.startsWith("video/")) {
-                        videoTrackIndex = i
+                    try {
+                        val muxerTrack = muxer.addTrack(format)
+                        trackMap[i] = muxerTrack
+                        extractor.selectTrack(i)
+                        if (mime.startsWith("video/") && videoTrackIndex == -1) {
+                            videoTrackIndex = i
+                        } else if (mime.startsWith("audio/") && audioTrackIndex == -1) {
+                            audioTrackIndex = i
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("FFmpegEngine", "Skipping incompatible track $i ($mime): ${e.message}")
                     }
                 }
             }
 
             if (trackMap.isEmpty()) {
-                return@withContext Result.failure(Exception("No supported audio/video tracks found"))
+                return@withContext Result.failure(Exception("No supported audio/video tracks found for clipping"))
             }
 
             muxer.start()
 
-            val startUs = startMs * 1000L
-            val endUs = endMs * 1000L
+            val startUs = maxOf(0L, startMs * 1000L)
+            val endUs = maxOf(startUs + 250_000L, endMs * 1000L)
 
-            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            // Seek to previous sync point for clean cut
+            if (startUs > 0) {
+                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            }
 
-            val buffer = ByteBuffer.allocate(2 * 1024 * 1024)
+            val buffer = ByteBuffer.allocate(maxInputBufSize)
             val bufferInfo = MediaCodec.BufferInfo()
-            var firstVideoKeyframeSeen = false
-            var videoBaseUs = -1L
-            var audioBaseUs = -1L
+
+            val hasVideo = videoTrackIndex != -1
+            var baseUs = -1L
+            var firstKeyframeFound = !hasVideo
+            val lastTrackPts = mutableMapOf<Int, Long>()
+            var totalSamplesWritten = 0
+
+            var videoReachedEnd = false
+            var audioReachedEnd = false
 
             while (true) {
                 val trackIndex = extractor.sampleTrackIndex
                 if (trackIndex < 0) break
 
                 val sampleTimeUs = extractor.sampleTime
+                val isVideo = (trackIndex == videoTrackIndex)
+                val isAudio = (trackIndex == audioTrackIndex)
 
-                // If video track reached end, stop clipping
-                if (trackIndex == videoTrackIndex && sampleTimeUs > endUs) {
+                // Check end condition
+                if (isVideo && sampleTimeUs > endUs) {
+                    videoReachedEnd = true
+                }
+                if (isAudio && sampleTimeUs > (endUs + 200_000L)) {
+                    audioReachedEnd = true
+                }
+
+                val allEnded = (hasVideo && videoReachedEnd && (audioTrackIndex == -1 || audioReachedEnd)) ||
+                        (!hasVideo && audioReachedEnd) ||
+                        (hasVideo && sampleTimeUs > (endUs + 2_000_000L))
+
+                if (allEnded) {
                     break
                 }
 
-                val isVideo = (trackIndex == videoTrackIndex)
                 val muxerTrack = trackMap[trackIndex]
-
                 if (muxerTrack != null) {
                     val flags = extractor.sampleFlags
                     val isKey = (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
 
-                    if (isVideo && !firstVideoKeyframeSeen) {
+                    // For video, ensure the first written sample is an IDR/keyframe
+                    if (isVideo && !firstKeyframeFound) {
                         if (isKey) {
-                            firstVideoKeyframeSeen = true
-                            videoBaseUs = sampleTimeUs
+                            firstKeyframeFound = true
+                            baseUs = sampleTimeUs
                         } else {
                             if (!extractor.advance()) break
                             continue
                         }
                     }
 
-                    if (firstVideoKeyframeSeen || !isVideo) {
-                        if (sampleTimeUs >= (startUs - 1_000_000L)) {
-                            val base = if (isVideo) videoBaseUs else {
-                                if (audioBaseUs == -1L) audioBaseUs = sampleTimeUs
-                                audioBaseUs
-                            }
+                    // For audio-only streams, establish base from first audio sample
+                    if (!hasVideo && baseUs == -1L) {
+                        baseUs = sampleTimeUs
+                    }
 
-                            bufferInfo.offset = 0
-                            bufferInfo.size = extractor.readSampleData(buffer, 0)
-                            if (bufferInfo.size > 0) {
-                                bufferInfo.presentationTimeUs = maxOf(0L, sampleTimeUs - base)
-                                bufferInfo.flags = flags
-                                muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
-                            }
+                    val canWrite = firstKeyframeFound && (
+                        (isVideo && !videoReachedEnd) ||
+                        (isAudio && !audioReachedEnd) ||
+                        (!isVideo && !isAudio && sampleTimeUs <= endUs)
+                    )
+
+                    if (canWrite) {
+                        // Drop pre-roll audio packets prior to first video keyframe
+                        if (isAudio && hasVideo && sampleTimeUs < (baseUs - 50_000L)) {
+                            if (!extractor.advance()) break
+                            continue
+                        }
+
+                        bufferInfo.offset = 0
+                        bufferInfo.size = extractor.readSampleData(buffer, 0)
+                        if (bufferInfo.size > 0) {
+                            val rawPts = maxOf(0L, sampleTimeUs - baseUs)
+                            val lastPts = lastTrackPts[trackIndex] ?: -1L
+                            // Guarantee strictly monotonic presentation timestamps per track
+                            // to prevent MediaMuxer crash on B-frames or sample timestamp jitter
+                            val safePts = if (rawPts >= lastPts) rawPts else (lastPts + 1000L)
+                            lastTrackPts[trackIndex] = safePts
+
+                            bufferInfo.presentationTimeUs = safePts
+                            bufferInfo.flags = flags
+                            muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
+                            totalSamplesWritten++
                         }
                     }
                 }
@@ -414,11 +487,17 @@ class FFmpegEngine {
                 }
             }
 
-            muxer.stop()
+            if (totalSamplesWritten > 0) {
+                try {
+                    muxer.stop()
+                } catch (e: Exception) {
+                    android.util.Log.w("FFmpegEngine", "muxer.stop exception: ${e.message}")
+                }
+            }
 
-            if (!outputFile.exists() || outputFile.length() < 1024) {
+            if (totalSamplesWritten == 0 || !outputFile.exists() || outputFile.length() < 1024) {
                 outputFile.delete()
-                return@withContext Result.failure(Exception("Clipping video segment produced an empty or corrupted file"))
+                return@withContext Result.failure(Exception("Clipping produced empty file (0 samples written)"))
             }
 
             Result.success(outputPath)
