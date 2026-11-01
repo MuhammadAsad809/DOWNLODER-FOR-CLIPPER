@@ -29,6 +29,7 @@ import com.vitre.downloader.core.models.DownloadStatus
 import com.vitre.downloader.core.models.MediaInfo
 import com.vitre.downloader.core.storage.MediaResolver
 import com.vitre.downloader.ui.components.AdaptivePillNavBar
+import com.vitre.downloader.ui.components.DeveloperSupportDialog
 import com.vitre.downloader.ui.components.NavDestination
 import com.vitre.downloader.ui.screens.*
 import com.vitre.downloader.ui.theme.OledBlack
@@ -82,6 +83,18 @@ class MainActivity : ComponentActivity() {
             val glassIntensity by app.preferences.glassIntensity.collectAsState(initial = 0.7f)
             val enableAgsl by app.preferences.enableAgsl.collectAsState(initial = true)
             val customDownloadUri by app.preferences.customDownloadUri.collectAsState(initial = null)
+            val hasSeenDevSupportState = app.preferences.hasSeenDevSupport.collectAsState(initial = null)
+
+            // Developer Support Message State
+            var showDevSupportDialog by remember { mutableStateOf(false) }
+            var devSupportAdLoading by remember { mutableStateOf(false) }
+            var devSupportStatusMessage by remember { mutableStateOf<String?>(null) }
+
+            LaunchedEffect(hasSeenDevSupportState.value) {
+                if (hasSeenDevSupportState.value == false) {
+                    showDevSupportDialog = true
+                }
+            }
 
             // Navigation State
             var currentNav by remember { mutableStateOf(NavDestination.HOME) }
@@ -328,11 +341,39 @@ class MainActivity : ComponentActivity() {
                                     onEnableAgslChange = { ea -> scope.launch { app.preferences.setEnableAgsl(ea) } },
                                     hasCookies = cookieManager.hasCookies(),
                                     onNavigateCookies = { activeSubScreen = "cookies" },
-                                    onNavigateDiagnostics = { activeSubScreen = "diagnostics" }
+                                    onNavigateDiagnostics = { activeSubScreen = "diagnostics" },
+                                    onOpenDevSupport = { showDevSupportDialog = true }
                                 )
                             }
                         }
                     }
+                }
+
+                if (showDevSupportDialog) {
+                    DeveloperSupportDialog(
+                        onDismiss = {
+                            showDevSupportDialog = false
+                            scope.launch { app.preferences.setHasSeenDevSupport(true) }
+                        },
+                        onWatchAd = {
+                            devSupportAdLoading = true
+                            devSupportStatusMessage = "Loading ad to support developer..."
+                            app.appOpenAdManager.showUserRequestedAd(
+                                activity = this@MainActivity,
+                                onStatusMessage = { msg ->
+                                    devSupportStatusMessage = msg
+                                },
+                                onComplete = {
+                                    devSupportAdLoading = false
+                                    showDevSupportDialog = false
+                                    devSupportStatusMessage = null
+                                    scope.launch { app.preferences.setHasSeenDevSupport(true) }
+                                }
+                            )
+                        },
+                        isLoadingAd = devSupportAdLoading,
+                        statusMessage = devSupportStatusMessage
+                    )
                 }
             }
         }

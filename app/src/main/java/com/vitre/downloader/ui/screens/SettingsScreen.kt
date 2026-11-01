@@ -39,6 +39,7 @@ fun SettingsScreen(
     hasCookies: Boolean,
     onNavigateCookies: () -> Unit,
     onNavigateDiagnostics: () -> Unit,
+    onOpenDevSupport: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -246,6 +247,18 @@ fun SettingsScreen(
                     title = "Engine Diagnostics",
                     subtitle = "Inspect yt-dlp, FFmpeg, and native runtimes",
                     onClick = onNavigateDiagnostics
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(text = "About & Support", style = MaterialTheme.typography.titleSmall, color = ElectricBlue)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                SettingsNavCard(
+                    icon = Icons.Default.Favorite,
+                    title = "Support Solo Developer ❤️",
+                    subtitle = "Read developer note & watch an ad to support this app",
+                    onClick = onOpenDevSupport
                 )
             }
         }

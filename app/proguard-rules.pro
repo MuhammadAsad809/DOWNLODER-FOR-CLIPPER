@@ -6,3 +6,11 @@
 
 # Room ProGuard rules
 -keep class * extends androidx.room.RoomDatabase
+
+# Google Mobile Ads SDK rules
+-keep public class com.google.android.gms.ads.** {
+    public *;
+}
+-keep public class com.google.ads.** {
+    public *;
+}

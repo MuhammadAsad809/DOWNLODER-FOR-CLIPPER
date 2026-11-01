@@ -35,6 +35,11 @@
         android:requestLegacyExternalStorage="true"
         tools:targetApi="35">
 
+        <!-- Google AdMob Application ID -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-2775984163501785~5678049612" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

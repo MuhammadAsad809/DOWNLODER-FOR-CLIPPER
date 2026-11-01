@@ -17,6 +17,7 @@ class VitrePreferences(private val context: Context) {
     private val KEY_REDUCED_MOTION = booleanPreferencesKey("reduced_motion")
     private val KEY_ENABLE_AGSL = booleanPreferencesKey("enable_agsl")
     private val KEY_CUSTOM_DOWNLOAD_URI = stringPreferencesKey("custom_download_tree_uri")
+    private val KEY_HAS_SEEN_DEV_SUPPORT = booleanPreferencesKey("has_seen_dev_support_prompt")
 
     val defaultQuality: Flow<String> = context.dataStore.data.map { it[KEY_QUALITY] ?: "best" }
     val defaultAudioFormat: Flow<String> = context.dataStore.data.map { it[KEY_AUDIO_FORMAT] ?: "mp3" }
@@ -25,6 +26,7 @@ class VitrePreferences(private val context: Context) {
     val reducedMotion: Flow<Boolean> = context.dataStore.data.map { it[KEY_REDUCED_MOTION] ?: false }
     val enableAgsl: Flow<Boolean> = context.dataStore.data.map { it[KEY_ENABLE_AGSL] ?: true }
     val customDownloadUri: Flow<String?> = context.dataStore.data.map { it[KEY_CUSTOM_DOWNLOAD_URI] }
+    val hasSeenDevSupport: Flow<Boolean> = context.dataStore.data.map { it[KEY_HAS_SEEN_DEV_SUPPORT] ?: false }
 
     suspend fun setQuality(quality: String) {
         context.dataStore.edit { it[KEY_QUALITY] = quality }
@@ -58,5 +60,9 @@ class VitrePreferences(private val context: Context) {
                 it.remove(KEY_CUSTOM_DOWNLOAD_URI)
             }
         }
+    }
+
+    suspend fun setHasSeenDevSupport(seen: Boolean) {
+        context.dataStore.edit { it[KEY_HAS_SEEN_DEV_SUPPORT] = seen }
     }
 }
