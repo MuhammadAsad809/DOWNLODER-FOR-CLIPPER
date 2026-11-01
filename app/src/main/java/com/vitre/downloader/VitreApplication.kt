@@ -20,7 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-class VitreApplication : Application(), Application.ActivityLifecycleCallbacks, DefaultLifecycleObserver {
+class VitreApplication : Application(), Application.ActivityLifecycleCallbacks {
 
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -54,25 +54,28 @@ class VitreApplication : Application(), Application.ActivityLifecycleCallbacks, 
         // 4. Initialize Google Mobile Ads SDK
         MobileAds.initialize(this) {}
 
-        // 5. Initialize AdMob App Open Ad Manager & Register Lifecycle Observers
+        // 5. Initialize AdMob App Open Ad Manager & Register Activity Callbacks
         appOpenAdManager = AppOpenAdManager.getInstance(this)
         registerActivityLifecycleCallbacks(this)
-        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+
+        // 6. Register Process Lifecycle Observer for foreground transitions
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                // Show App Open Ad when returning to foreground
+                currentActivity?.let { activity ->
+                    // Do not show over QuickShareActivity
+                    if (activity !is QuickShareActivity) {
+                        appOpenAdManager.showAdIfAvailable(activity)
+                    }
+                }
+            }
+        })
+
+        // Preload first ad
         appOpenAdManager.loadAd(this)
 
-        // 6. Create Notification Channel for Foreground Service
+        // 7. Create Notification Channel for Foreground Service
         createNotificationChannel()
-    }
-
-    override fun onStart(owner: LifecycleOwner) {
-        super.onStart(owner)
-        // Show App Open Ad when returning to foreground
-        currentActivity?.let { activity ->
-            // Do not show over QuickShareActivity
-            if (activity !is QuickShareActivity) {
-                appOpenAdManager.showAdIfAvailable(activity)
-            }
-        }
     }
 
     override fun onActivityStarted(activity: Activity) {
