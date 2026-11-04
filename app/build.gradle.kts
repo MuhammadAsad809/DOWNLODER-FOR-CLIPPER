@@ -85,8 +85,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
 
-    // Google Mobile Ads SDK (AdMob)
-    implementation("com.google.android.gms:play-services-ads:23.6.0")
+    // Unity Ads SDK
+    implementation("com.unity3d.ads:unity-ads:4.18.0")
 
     // Jetpack Compose
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
