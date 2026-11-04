@@ -79,9 +79,7 @@ class VitreApplication : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     override fun onActivityStarted(activity: Activity) {
-        if (!appOpenAdManager.isShowingAd) {
-            currentActivity = activity
-        }
+        currentActivity = activity
     }
 
     override fun onActivityResumed(activity: Activity) {
