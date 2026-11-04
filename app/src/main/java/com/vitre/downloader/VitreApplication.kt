@@ -7,18 +7,17 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.ProcessLifecycleOwner
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
-import com.google.android.gms.ads.MobileAds
-import com.vitre.downloader.core.ads.AppOpenAdManager
 import com.vitre.downloader.core.database.AppDatabase
 import com.vitre.downloader.core.preferences.VitrePreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.unity3d.ads.IUnityAdsInitializationListener
+import com.unity3d.ads.UnityAds
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class VitreApplication : Application(), Application.ActivityLifecycleCallbacks {
 
@@ -30,11 +29,11 @@ class VitreApplication : Application(), Application.ActivityLifecycleCallbacks {
     lateinit var preferences: VitrePreferences
         private set
 
-    lateinit var appOpenAdManager: AppOpenAdManager
-        private set
-
     var currentActivity: Activity? = null
         private set
+
+    private val _unityAdsReady = MutableStateFlow(false)
+    val unityAdsReady = _unityAdsReady.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()
@@ -51,28 +50,29 @@ class VitreApplication : Application(), Application.ActivityLifecycleCallbacks {
         // 3. Initialize DataStore Preferences
         preferences = VitrePreferences(this)
 
-        // 4. Initialize Google Mobile Ads SDK
-        MobileAds.initialize(this) {}
+        // 4. Initialize Unity Ads once at application startup
+        UnityAds.initialize(
+            applicationContext,
+            UNITY_GAME_ID,
+            BuildConfig.DEBUG,
+            object : IUnityAdsInitializationListener {
+                override fun onInitializationComplete() {
+                    _unityAdsReady.value = true
+                    android.util.Log.i("VitreUnityAds", "Unity Ads initialized.")
+                }
 
-        // 5. Initialize AdMob App Open Ad Manager & Register Activity Callbacks
-        appOpenAdManager = AppOpenAdManager.getInstance(this)
-        registerActivityLifecycleCallbacks(this)
-
-        // 6. Register Process Lifecycle Observer for foreground transitions
-        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                // Show App Open Ad when returning to foreground
-                currentActivity?.let { activity ->
-                    // Do not show over QuickShareActivity
-                    if (activity !is QuickShareActivity) {
-                        appOpenAdManager.showAdIfAvailable(activity)
-                    }
+                override fun onInitializationFailed(
+                    error: UnityAds.UnityAdsInitializationError,
+                    message: String
+                ) {
+                    _unityAdsReady.value = false
+                    android.util.Log.e("VitreUnityAds", "Initialization failed: $error - $message")
                 }
             }
-        })
+        )
 
-        // Preload first ad
-        appOpenAdManager.loadAd(this)
+        // 5. Register activity callbacks for current-activity tracking
+        registerActivityLifecycleCallbacks(this)
 
         // 7. Create Notification Channel for Foreground Service
         createNotificationChannel()
@@ -120,6 +120,7 @@ class VitreApplication : Application(), Application.ActivityLifecycleCallbacks {
     }
 
     companion object {
+        const val UNITY_GAME_ID = "800424586"
         const val CHANNEL_ID = "vitre_downloads_channel"
         lateinit var instance: VitreApplication
             private set
