@@ -335,7 +335,7 @@ class MainActivity : ComponentActivity() {
                                     hasCookies = cookieManager.hasCookies(),
                                     onNavigateCookies = { activeSubScreen = "cookies" },
                                     onNavigateDiagnostics = { activeSubScreen = "diagnostics" },
-                                    onOpenDevSupport = { showDevSupportDialog = true }
+                                    onOpenDevSupport = { /* Banner ads are displayed in the bottom navigation area. */ }
                                 )
                             }
                         }
