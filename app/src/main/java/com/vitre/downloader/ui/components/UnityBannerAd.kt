@@ -64,7 +64,7 @@ fun UnityBannerAd(modifier: Modifier = Modifier) {
 
     DisposableEffect(bannerView) {
         onDispose {
-            bannerView.destroy()
+            (bannerView.parent as? android.view.ViewGroup)?.removeView(bannerView)
         }
     }
 
