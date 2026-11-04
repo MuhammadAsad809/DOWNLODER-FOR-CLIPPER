@@ -1,5 +1,6 @@
 package com.vitre.downloader.ui.components
 
+import android.app.Activity
 import android.util.Log
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,6 +10,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -31,7 +33,7 @@ fun UnityBannerAd(modifier: Modifier = Modifier) {
 
     if (!isReady) return
 
-    val activity = app.currentActivity ?: return
+    val activity = LocalContext.current as? Activity ?: return
     val bannerView = remember(activity) {
         BannerView(activity, BANNER_AD_UNIT_ID, UnityBannerSize(320, 50)).apply {
             setListener(object : BannerView.IListener {
