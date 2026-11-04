@@ -41,6 +41,10 @@ fun UnityBannerAd(modifier: Modifier = Modifier) {
                     Log.i(TAG, "Banner loaded: ${bannerAdView.placementId}")
                 }
 
+                override fun onBannerShown(bannerAdView: BannerView) {
+                    Log.i(TAG, "Banner shown: ${bannerAdView.placementId}")
+                }
+
                 override fun onBannerFailedToLoad(
                     bannerAdView: BannerView,
                     errorInfo: BannerErrorInfo
